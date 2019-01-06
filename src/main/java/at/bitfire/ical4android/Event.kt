@@ -17,11 +17,14 @@ import net.fortuna.ical4j.model.Calendar
 import net.fortuna.ical4j.model.TimeZone
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.component.VEvent
+import net.fortuna.ical4j.model.parameter.Value
 import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.util.Dates
 import java.io.IOException
 import java.io.OutputStream
 import java.io.Reader
 import java.util.*
+
 
 class Event: ICalendar() {
 
@@ -311,5 +314,41 @@ class Event: ICalendar() {
 
         return event
     }
+
+    fun getEndDate(deriveFromDuration: Boolean): DtEnd? {
+        val dtStart = this.dtStart
+        var dtEnd = this.dtEnd
+        // No DTEND? No problem, we'll use the DURATION.
+        if (dtEnd == null && deriveFromDuration && dtStart != null) {
+            val vEventDuration: Duration
+            val duration = this.duration
+            if (duration != null) {
+                vEventDuration = duration
+            } else if (dtStart.getDate() is DateTime) {
+                // If "DTSTART" is a DATE-TIME, then the event's duration is zero (see: RFC 5545, 3.6.1 Event Component)
+                vEventDuration = Duration(Dur(0, 0, 0, 0))
+            } else {
+                // If "DTSTART" is a DATE, then the event's duration is one day (see: RFC 5545, 3.6.1 Event Component)
+                vEventDuration = Duration(Dur(1, 0, 0, 0))
+            }
+
+            dtEnd = DtEnd(Dates.getInstance(
+                    TemporalAmountAdapter(vEventDuration.duration).getTime(dtStart.getDate()),
+                    dtStart.getParameter(Parameter.VALUE) as Value?))
+            if (dtStart.isUtc()) {
+                dtEnd.isUtc = true
+            }
+        }
+        return dtEnd
+    }
+
+    // helpers
+
+    /**
+     * Determines whether this Event is an all-day event.
+     *
+     * @return *true* if [dtStart] is a DATE value; *false* otherwise ([dtStart] is a DATETIME value or *null*)
+     */
+    fun isAllDay() = dtStart != null && !isDateTime(dtStart)
 
 }
