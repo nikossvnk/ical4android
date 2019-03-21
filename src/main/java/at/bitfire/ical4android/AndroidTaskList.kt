@@ -139,7 +139,7 @@ abstract class AndroidTaskList<out T: AndroidTask>(
      *
      * @return events from this task list which match the selection
      */
-    fun queryTasks(_where: String? = null, _whereArgs: Array<String>? = null): List<T> {
+    fun queryTasks(_where: String? = null, _whereArgs: Array<String>? = null, sortOrder: String? = null): List<T> {
         val where = "(${_where ?: "1"}) AND ${Tasks.LIST_ID}=?"
         val whereArgs = (_whereArgs ?: arrayOf()) + id.toString()
 
@@ -147,7 +147,7 @@ abstract class AndroidTaskList<out T: AndroidTask>(
         provider.client.query(
                 tasksSyncUri(),
                 null,
-                where, whereArgs, null)?.use { cursor ->
+                where, whereArgs, sortOrder)?.use { cursor ->
             while (cursor.moveToNext())
                 tasks += taskFactory.fromProvider(this, cursor.toValues())
         }

@@ -181,12 +181,12 @@ abstract class AndroidCalendar<out T: AndroidEvent>(
      * @param _whereArgs arguments for selection
      * @return events from this calendar which match the selection
      */
-    fun queryEvents(_where: String? = null, _whereArgs: Array<String>? = null): List<T> {
+    fun queryEvents(_where: String? = null, _whereArgs: Array<String>? = null, sortOrder: String? = null): List<T> {
         val where = "(${_where ?: "1"}) AND " + Events.CALENDAR_ID + "=?"
         val whereArgs = (_whereArgs ?: arrayOf()) + id.toString()
 
         val events = LinkedList<T>()
-        provider.query(eventsSyncURI(), null, where, whereArgs, null)?.use { cursor ->
+        provider.query(eventsSyncURI(), null, where, whereArgs, sortOrder)?.use { cursor ->
             while (cursor.moveToNext())
                 events += eventFactory.fromProvider(this, cursor.toValues())
         }
