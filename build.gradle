@@ -1,7 +1,6 @@
 
 buildscript {
     ext.versions = [
-        dokka: '0.10.1',
         ical4j: '3.0.20',
         // latest Apache Commons versions that don't require Java 8 (Android 7)
         commonsIO: '2.6'
@@ -15,7 +14,6 @@ buildscript {
     dependencies {
         classpath "com.android.tools.build:gradle:$rootProject.ext.gradle_version"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath "org.jetbrains.dokka:dokka-android-gradle-plugin:${versions.dokka}"
     }
 }
 
@@ -26,7 +24,6 @@ repositories {
 
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
-apply plugin: 'org.jetbrains.dokka'
 
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
@@ -63,14 +60,6 @@ android {
 
     sourceSets {
         main.java.srcDirs = [ "src/main/java", "opentasks-contract/src/main/java" ]
-    }
-
-    dokka.configuration {
-        sourceLink {
-            url = "https://gitlab.com/bitfireAT/ical4android/tree/master/"
-            lineSuffix = "#L"
-        }
-        jdkVersion = 8
     }
 }
 
