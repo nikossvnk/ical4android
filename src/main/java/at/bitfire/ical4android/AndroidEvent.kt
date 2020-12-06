@@ -562,8 +562,6 @@ abstract class AndroidEvent(
                     .withEventId(Events.ORIGINAL_ID, idxEvent)
 
             buildEvent(exception, exBuilder)
-            if (exBuilder.values[Events.ORIGINAL_SYNC_ID] == null && exBuilder.valueBackrefs[Events.ORIGINAL_SYNC_ID] == null)
-                throw AssertionError("buildEvent(exception) must set ORIGINAL_SYNC_ID")
 
             var recurrenceDate = recurrenceId.date
             val dtStartDate = event.dtStart!!.date
