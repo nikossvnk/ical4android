@@ -27,11 +27,10 @@ apply plugin: 'kotlin-android'
 
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
 
     defaultConfig {
         minSdkVersion 21        // Android 5.0
-        targetSdkVersion 30     // Android 11
+        targetSdkVersion 33
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -42,24 +41,21 @@ android {
         // ical4j >= 3.x uses the Java 8 Time API
         coreLibraryDesugaringEnabled true
 
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
-
-    lintOptions {
-        disable 'AllowBackup'
-        disable 'InvalidPackage'
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     packagingOptions {
-        exclude 'META-INF/DEPENDENCIES'
-        exclude 'META-INF/LICENSE'
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE']
+        }
     }
+
 
     sourceSets {
         main.java.srcDirs = [ "src/main/java", "opentasks-contract/src/main/java" ]
+    }
+    lint {
+        disable 'AllowBackup', 'InvalidPackage'
     }
 }
 
@@ -78,9 +74,9 @@ dependencies {
     implementation 'org.slf4j:slf4j-jdk14:1.7.30'
     implementation 'androidx.core:core-ktx:1.3.2'
 
-    androidTestImplementation 'androidx.test:core:1.3.0'
-    androidTestImplementation 'androidx.test:runner:1.3.0'
-    androidTestImplementation 'androidx.test:rules:1.3.0'
+    androidTestImplementation 'androidx.test:core:1.5.0'
+    androidTestImplementation 'androidx.test:runner:1.5.0'
+    androidTestImplementation 'androidx.test:rules:1.5.0'
     testImplementation 'junit:junit:4.13'
 
     // groovy is not really used, but required for running the tests
