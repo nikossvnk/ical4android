@@ -26,6 +26,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
+    namespace 'at.bitfire.ical4android'
     compileSdkVersion rootProject.ext.compileSdkVersion
 
     defaultConfig {
@@ -50,6 +51,10 @@ android {
         }
     }
 
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     sourceSets {
         main.java.srcDirs = [ "src/main/java", "opentasks-contract/src/main/java" ]

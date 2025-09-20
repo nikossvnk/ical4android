@@ -112,7 +112,7 @@ class TaskProvider private constructor(
             val info = context.packageManager.getPackageInfo(name.packageName, 0)
             val installedVersionCode = PackageInfoCompat.getLongVersionCode(info)
             if (installedVersionCode < name.minVersionCode) {
-                val exception = ProviderTooOldException(name, installedVersionCode, info.versionName)
+                val exception = ProviderTooOldException(name, installedVersionCode, info.versionName ?: "unknown")
                 Ical4Android.log.log(Level.WARNING, "Task provider too old", exception)
                 throw exception
             }
