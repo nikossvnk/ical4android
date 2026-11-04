@@ -1,12 +1,21 @@
 package at.bitfire.ical4android.util
 
-import at.bitfire.ical4android.DateUtils
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.DateTime
 import net.fortuna.ical4j.util.TimeZones
-import java.time.*
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.Period
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.Temporal
 import java.time.temporal.TemporalAmount
-import java.util.*
+import java.time.temporal.UnsupportedTemporalTypeException
+import java.util.Calendar
+import java.util.TimeZone
 
 object TimeApiExtensions {
 
@@ -23,56 +32,71 @@ object TimeApiExtensions {
     val tzUTC: TimeZone by lazy { TimeZones.getUtcTimeZone() }
 
 
-    /***** Desugaring compat *****/
+    /***** Temporals *****/
+
+    /*
+     * ical4j represents iCalendar values as java.time objects:
+     *
+     *   - DATE: [LocalDate] (interpreted as UTC midnight, like Android does for all-day events)
+     *   - DATE-TIME in UTC: [Instant] or [OffsetDateTime] with offset 0
+     *   - floating DATE-TIME: [LocalDateTime] (interpreted in the system default time zone)
+     *   - DATE-TIME with TZID: [ZonedDateTime]
+     */
 
     /**
-     * [TimeZone.toZoneId] can't be used with the current desugaring library yet!
+     * Returns the time zone this temporal is interpreted in:
+     *
+     *   - [ZoneOffset.UTC] for DATE values and UTC date-times,
+     *   - the system default time zone for floating date-times,
+     *   - the time zone/offset of the value otherwise.
      */
-    fun TimeZone.toZoneIdCompat(): ZoneId = ZoneId.of(id)
+    fun Temporal.requireZoneId(): ZoneId =
+            when (this) {
+                is ZonedDateTime -> zone
+                is OffsetDateTime -> offset
+                is Instant, is LocalDate -> ZoneOffset.UTC
+                is LocalDateTime -> ZoneId.systemDefault()
+                else -> throw UnsupportedTemporalTypeException("Unsupported temporal: ${this::class.java.name}")
+            }
 
+    /**
+     * Converts this temporal to a [ZonedDateTime] in the zone given by [requireZoneId]. DATE values
+     * are mapped to midnight (start of day).
+     */
+    fun Temporal.toZonedDateTime(): ZonedDateTime =
+            when (this) {
+                is ZonedDateTime -> this
+                is OffsetDateTime -> toZonedDateTime()
+                is Instant -> atZone(ZoneOffset.UTC)
+                is LocalDateTime -> atZone(ZoneId.systemDefault())
+                is LocalDate -> atStartOfDay(ZoneOffset.UTC)
+                else -> throw UnsupportedTemporalTypeException("Unsupported temporal: ${this::class.java.name}")
+            }
 
-    /***** Dates *****/
+    /**
+     * Converts this temporal to an [Instant] (see [toZonedDateTime]).
+     */
+    fun Temporal.toInstant(): Instant = toZonedDateTime().toInstant()
 
-    fun Date.toLocalDate(): LocalDate {
-        val utcDateTime = ZonedDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneOffset.UTC)
-        return utcDateTime.toLocalDate()
-    }
+    /**
+     * Converts this temporal to a UNIX timestamp in milliseconds (see [toZonedDateTime]), like it's
+     * used by the Android calendar/tasks providers.
+     */
+    fun Temporal.toTimestamp(): Long = toInstant().toEpochMilli()
 
-    fun DateTime.requireTimeZone(): TimeZone =
-            if (isUtc)
-                TimeZones.getUtcTimeZone()
+    /**
+     * Gets the calendar date of this temporal (in its own time zone, see [requireZoneId]).
+     */
+    fun Temporal.toLocalDate(): LocalDate =
+            if (this is LocalDate)
+                this
             else
-                timeZone ?: TimeZone.getDefault()
+                toZonedDateTime().toLocalDate()
 
-    fun DateTime.requireZoneId(): ZoneId =
-            if (isUtc)
-                ZoneOffset.UTC
-            else
-                timeZone?.toZoneIdCompat() ?: ZoneId.systemDefault()
-
-    fun DateTime.toLocalDate(): LocalDate =
-            toZonedDateTime().toLocalDate()
-
-    fun DateTime.toLocalTime(): LocalTime =
-            toZonedDateTime().toLocalTime()
-
-    fun DateTime.toZonedDateTime(): ZonedDateTime =
-            ZonedDateTime.ofInstant(Instant.ofEpochMilli(time), requireZoneId())
-
-    fun LocalDate.toIcal4jDate(): Date {
-        val cal = Calendar.getInstance(TimeZones.getDateTimeZone())
-        cal.set(year, monthValue - 1, dayOfMonth, 0, 0, 0)
-        return Date(cal)
-    }
-
-    fun ZonedDateTime.toIcal4jDateTime(): DateTime {
-        val date = DateTime(toEpochSecond() * MILLIS_PER_SECOND)
-        if (zone == ZoneOffset.UTC)
-            date.isUtc = true
-        else
-            date.timeZone = DateUtils.ical4jTimeZone(zone.id)
-        return date
-    }
+    /**
+     * Gets the time of day of this temporal (in its own time zone, see [requireZoneId]).
+     */
+    fun Temporal.toLocalTime(): LocalTime = toZonedDateTime().toLocalTime()
 
 
     /***** Durations *****/

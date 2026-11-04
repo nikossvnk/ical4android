@@ -1,18 +1,12 @@
 package at.bitfire.ical4android
 
-import at.bitfire.ical4android.util.TimeApiExtensions.requireTimeZone
+import at.bitfire.ical4android.util.TimeApiExtensions.requireZoneId
 import at.bitfire.ical4android.util.TimeApiExtensions.toDuration
-import at.bitfire.ical4android.util.TimeApiExtensions.toIcal4jDate
-import at.bitfire.ical4android.util.TimeApiExtensions.toIcal4jDateTime
 import at.bitfire.ical4android.util.TimeApiExtensions.toLocalDate
 import at.bitfire.ical4android.util.TimeApiExtensions.toLocalTime
 import at.bitfire.ical4android.util.TimeApiExtensions.toRfc5545Duration
-import at.bitfire.ical4android.util.TimeApiExtensions.toZoneIdCompat
 import at.bitfire.ical4android.util.TimeApiExtensions.toZonedDateTime
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.DateTime
-import net.fortuna.ical4j.model.TimeZone
-import net.fortuna.ical4j.util.TimeZones
+import net.fortuna.ical4j.model.TemporalAdapter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,12 +14,12 @@ import java.time.*
 
 class TimeApiExtensionsTest {
 
-    val tzBerlin: TimeZone = DateUtils.ical4jTimeZone("Europe/Berlin")!!
+    val tzBerlin: ZoneId = ZoneId.of("Europe/Berlin")
 
 
     @Test
     fun testDateToLocalDate() {
-        val date = Date("20200620").toLocalDate()
+        val date = LocalDate.parse("20200620", java.time.format.DateTimeFormatter.BASIC_ISO_DATE).toLocalDate()
         assertEquals(2020, date.year)
         assertEquals(6, date.monthValue)
         assertEquals(20, date.dayOfMonth)
@@ -34,28 +28,28 @@ class TimeApiExtensionsTest {
 
 
     @Test
-    fun testDateTimeRequireTimeZone() {
-        val time = DateTime("2020707T010203", tzBerlin)
-        assertEquals(tzBerlin, time.requireTimeZone())
+    fun testDateTimeRequireZoneId() {
+        val time = TemporalAdapter.parse("20200707T010203", tzBerlin).temporal
+        assertEquals(tzBerlin, time.requireZoneId())
     }
 
     @Test
-    fun testDateTimeRequireTimeZone_Floating() {
-        val time = DateTime("2020707T010203")
-        assertEquals(TimeZone.getDefault(), time.requireTimeZone())
+    fun testDateTimeRequireZoneId_Floating() {
+        val time = LocalDateTime.parse("20200707T010203", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))
+        assertEquals(ZoneId.systemDefault(), time.requireZoneId())
     }
 
     @Test
-    fun testDateTimeRequireTimeZone_Utc() {
-        val time = DateTime("2020707T010203Z").apply { isUtc = true }
-        assertTrue(time.isUtc)
-        assertEquals(TimeZones.getUtcTimeZone(), time.requireTimeZone())
+    fun testDateTimeRequireZoneId_Utc() {
+        val time = Instant.parse("2020-07-07T01:02:03Z")
+        assertTrue(TemporalAdapter.isUtc(time))
+        assertEquals(ZoneOffset.UTC, time.requireZoneId())
     }
 
 
     @Test
     fun testDateTimeToLocalDate_TimezoneBoundary() {
-        val date = DateTime("20200620T000000", tzBerlin).toLocalDate()
+        val date = TemporalAdapter.parse("20200620T000000", tzBerlin).temporal.toLocalDate()
         assertEquals(2020, date.year)
         assertEquals(6, date.monthValue)
         assertEquals(20, date.dayOfMonth)
@@ -64,7 +58,7 @@ class TimeApiExtensionsTest {
 
     @Test
     fun testDateTimeToLocalDate_TimezoneDuringDay() {
-        val date = DateTime("20200620T123000", tzBerlin).toLocalDate()
+        val date = TemporalAdapter.parse("20200620T123000", tzBerlin).temporal.toLocalDate()
         assertEquals(2020, date.year)
         assertEquals(6, date.monthValue)
         assertEquals(20, date.dayOfMonth)
@@ -73,7 +67,7 @@ class TimeApiExtensionsTest {
 
     @Test
     fun testDateTimeToLocalDate_UtcDuringDay() {
-        val date = DateTime("20200620T123000Z").apply { isUtc = true }.toLocalDate()
+        val date = Instant.parse("2020-06-20T12:30:00Z").toLocalDate()
         assertEquals(2020, date.year)
         assertEquals(6, date.monthValue)
         assertEquals(20, date.dayOfMonth)
@@ -83,25 +77,25 @@ class TimeApiExtensionsTest {
 
     @Test
     fun testDateTimeToLocalTime() {
-        assertEquals(LocalTime.of(12, 30), DateTime("20200620T123000", tzBerlin).toLocalTime())
+        assertEquals(LocalTime.of(12, 30), TemporalAdapter.parse("20200620T123000", tzBerlin).temporal.toLocalTime())
     }
 
     @Test
     fun testDateTimeToLocalTime_Floating() {
-        assertEquals(LocalTime.of(12, 30), DateTime("20200620T123000").toLocalTime())
+        assertEquals(LocalTime.of(12, 30), LocalDateTime.parse("20200620T123000", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")).toLocalTime())
     }
 
     @Test
     fun testDateTimeToLocalTime_Utc() {
-        assertEquals(LocalTime.of(12, 30), DateTime("20200620T123000Z").apply { isUtc = true }.toLocalTime())
+        assertEquals(LocalTime.of(12, 30), Instant.parse("2020-06-20T12:30:00Z").toLocalTime())
     }
 
 
     @Test
     fun testDateTimeToZonedDateTime() {
         assertEquals(
-                ZonedDateTime.of(2020, 7, 7, 10, 30, 0, 0, tzBerlin.toZoneIdCompat()),
-                DateTime("20200707T103000", tzBerlin).toZonedDateTime()
+                ZonedDateTime.of(2020, 7, 7, 10, 30, 0, 0, tzBerlin),
+                TemporalAdapter.parse("20200707T103000", tzBerlin).temporal.toZonedDateTime()
         )
     }
 
@@ -109,7 +103,7 @@ class TimeApiExtensionsTest {
     fun testDateTimeToZonedDateTime_Floating() {
         assertEquals(
                 ZonedDateTime.of(2020, 7, 7, 10, 30, 0, 0, ZoneId.systemDefault()),
-                DateTime("20200707T103000").toZonedDateTime()
+                LocalDateTime.parse("20200707T103000", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")).toZonedDateTime()
         )
     }
 
@@ -117,33 +111,11 @@ class TimeApiExtensionsTest {
     fun testDateTimeToZonedDateTime_UTC() {
         assertEquals(
                 ZonedDateTime.of(2020, 7, 7, 10, 30, 0, 0, ZoneOffset.UTC),
-                DateTime("20200707T103000Z").apply { isUtc = true }.toZonedDateTime()
+                Instant.parse("2020-07-07T10:30:00Z").toZonedDateTime()
         )
     }
 
 
-    @Test
-    fun testLocalDateToIcal4jDate() {
-        assertEquals(Date("19000118"), LocalDate.of(1900, 1, 18).toIcal4jDate())
-        assertEquals(Date("20200620"), LocalDate.of(2020, 6, 20).toIcal4jDate())
-    }
-
-    @Test
-    fun testZonedDateTimeToIcal4jDateTime() {
-        val tzBerlin = DateUtils.ical4jTimeZone("Europe/Berlin")
-        assertEquals(
-                DateTime("20200705T010203", tzBerlin),
-                ZonedDateTime.of(2020, 7, 5, 1, 2, 3, 0, ZoneId.of("Europe/Berlin")).toIcal4jDateTime()
-        )
-    }
-
-    @Test
-    fun testZonedDateTimeToIcal4jDateTime_Utc() {
-        assertEquals(
-                DateTime("20200705T010203Z"),
-                ZonedDateTime.of(2020, 7, 5, 1, 2, 3, 0, ZoneOffset.UTC).toIcal4jDateTime()
-        )
-    }
 
 
     @Test

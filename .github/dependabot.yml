@@ -1,0 +1,18 @@
+# Opens pull requests to update the dependencies. The Check workflow runs on them, so an update
+# that breaks the library is noticed before it is merged. This library is also built as part of
+# nikossvnk/etesync-android, which picks up new commits through its own Dependabot.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -8,8 +8,10 @@
 
 package at.bitfire.ical4android
 
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.DateTime
+import java.time.Instant
+import java.time.LocalDate
+
+import net.fortuna.ical4j.model.property.DateProperty
 import net.fortuna.ical4j.model.property.DtEnd
 import net.fortuna.ical4j.model.property.DtStart
 import org.junit.Assert.*
@@ -51,16 +53,18 @@ class DateUtilsTest {
 
     @Test
     fun testIsDate() {
-        assertTrue(DateUtils.isDate(DtStart(Date("20200101"))))
-        assertFalse(DateUtils.isDate(DtStart(DateTime("20200101T010203Z"))))
-        assertFalse(DateUtils.isDate(null))
+        assertTrue(DateUtils.isDate(DtStart(LocalDate.parse("20200101", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))))
+        assertFalse(DateUtils.isDate(DtStart(Instant.parse("2020-01-01T01:02:03Z"))))
+        assertFalse(DateUtils.isDate(null as DateProperty<*>?))
+        assertFalse(DateUtils.isDate(null as java.time.temporal.Temporal?))
     }
 
     @Test
     fun testIsDateTime() {
-        assertFalse(DateUtils.isDateTime(DtEnd(Date("20200101"))))
-        assertTrue(DateUtils.isDateTime(DtEnd(DateTime("20200101T010203Z"))))
-        assertFalse(DateUtils.isDateTime(null))
+        assertFalse(DateUtils.isDateTime(DtEnd(LocalDate.parse("20200101", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))))
+        assertTrue(DateUtils.isDateTime(DtEnd(Instant.parse("2020-01-01T01:02:03Z"))))
+        assertFalse(DateUtils.isDateTime(null as DateProperty<*>?))
+        assertFalse(DateUtils.isDateTime(null as java.time.temporal.Temporal?))
     }
 
 }

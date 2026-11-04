@@ -7,17 +7,25 @@
  */
 package at.bitfire.ical4android
 
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.DateTime
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.temporal.Temporal
+import net.fortuna.ical4j.model.TemporalAdapter
+import at.bitfire.ical4android.util.TimeApiExtensions.toTimestamp
+
 import net.fortuna.ical4j.model.Parameter
 import net.fortuna.ical4j.model.TimeZoneRegistryFactory
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.model.property.immutable.ImmutableAction
+import net.fortuna.ical4j.validate.ValidationException
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.FileNotFoundException
 import java.io.InputStreamReader
+import java.io.StringReader
 import java.nio.charset.Charset
 import java.time.Duration
 
@@ -53,8 +61,8 @@ class EventTest {
         val e = events.first()
         assertEquals("only-dst@example.com", e.uid)
         val dtStart = e.dtStart!!
-        assertEquals("Europe/Berlin", dtStart.timeZone.id)
-        assertEquals(1522738800000L, dtStart.date.time)
+        assertEquals("Europe/Berlin", DateUtils.tzId(dtStart))
+        assertEquals(1522738800000L, dtStart.date.toTimestamp())
     }
 
     @Test
@@ -63,9 +71,9 @@ class EventTest {
 
         val e = Event()
         e.uid = "etc-utc-test@example.com"
-        e.dtStart = DtStart("20200926T080000", tzUTC)
-        e.dtEnd = DtEnd("20200926T100000", tzUTC)
-        e.alarms += VAlarm(Duration.ofMinutes(-30))
+        e.dtStart = DtStart(TemporalAdapter.parse("20200926T080000", tzUTC!!.toZoneId()).temporal)
+        e.dtEnd = DtEnd(TemporalAdapter.parse("20200926T100000", tzUTC!!.toZoneId()).temporal)
+        e.alarms += VAlarm(Duration.ofMinutes(-30)).apply { this += ImmutableAction.AUDIO }
         e.attendees += Attendee("mailto:test@example.com")
         val baos = ByteArrayOutputStream()
         e.write(baos)
@@ -87,6 +95,7 @@ class EventTest {
         assertEquals("Event 1", e.summary)
         assertEquals(1, e.exceptions.size)
         assertEquals("Event 1 Exception", e.exceptions.first.summary)
+        assertEquals("20230712", e.exceptions.first.recurrenceId!!.value)
 
         e = findEvent(events, "multiple-2@ical4android.EventTest")
         assertEquals("Event 2", e.summary)
@@ -104,33 +113,60 @@ class EventTest {
         assertEquals("中华人民共和国", event.location)
         assertEquals(Css3Color.aliceblue, event.color)
 
-        // TODO: use attendee.getParameter<Email>(Parameter.EMAIL) when
-        // https://github.com/ical4j/ical4j/pull/413 and
-        // https://github.com/ical4j/ical4j/pull/414 are merged
-        assertEquals("cyrus@example.com", event.attendees.first.parameters.getParameter<Parameter>("EMAIL").value)
+        // The redundant trailing T accepted by older parsers denotes floating local time, not UTC.
+        assertEquals(LocalDateTime.of(2013, 10, 9, 17, 0), event.dtStart!!.date)
+        assertEquals(LocalDateTime.of(2013, 10, 9, 18, 0), event.dtEnd!!.date)
+        assertFalse(event.dtStart!!.isUtc)
+        assertNull(DateUtils.tzId(event.dtStart))
+
+        assertEquals("cyrus@example.com", event.attendees.first.getParameter<Parameter>("EMAIL").get().value)
 
         val unknown = event.unknownProperties.first
         assertEquals("X-UNKNOWN-PROP", unknown.name)
-        assertEquals("xxx", unknown.getParameter<Parameter>("param1").value)
+        assertEquals("xxx", unknown.getParameter<Parameter>("param1").get().value)
         assertEquals("Unknown Value", unknown.value)
+    }
+
+    @Test
+    fun testRedundantDateTimeSuffixKeepsTimeZoneAndRecurrences() {
+        val event = Event.eventsFromReader(StringReader(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n" +
+                "UID:legacy-date-time@example.com\r\n" +
+                "DTSTART;TZID=Europe/Vienna:20131009T170000T\r\n" +
+                "DTEND;TZID=Europe/Vienna:20131009T180000T\r\n" +
+                "RDATE;TZID=Europe/Vienna:20131010T170000T\r\n" +
+                "EXDATE;TZID=Europe/Vienna:20131011T170000T\r\n" +
+                "SUMMARY:20131009T170000T\r\n" +
+                "END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )).single()
+        val output = ByteArrayOutputStream()
+        event.write(output)
+        val regenerated = Event.eventsFromReader(StringReader(output.toString(Charsets.UTF_8.name()))).single()
+        val zone = ZoneId.of("Europe/Vienna")
+        assertEquals(LocalDateTime.of(2013, 10, 9, 17, 0).atZone(zone).toInstant().toEpochMilli(), regenerated.dtStart!!.date.toTimestamp())
+        assertEquals(LocalDateTime.of(2013, 10, 9, 18, 0).atZone(zone).toInstant().toEpochMilli(), regenerated.dtEnd!!.date.toTimestamp())
+        assertEquals("Europe/Vienna", DateUtils.tzId(regenerated.dtStart))
+        assertEquals(listOf(LocalDateTime.of(2013, 10, 10, 17, 0).atZone(zone).toInstant().toEpochMilli()), regenerated.rDates.single().dates.map { it.toTimestamp() })
+        assertEquals(listOf(LocalDateTime.of(2013, 10, 11, 17, 0).atZone(zone).toInstant().toEpochMilli()), regenerated.exDates.single().dates.map { it.toTimestamp() })
+        assertEquals("20131009T170000T", regenerated.summary)
     }
 
     @Test
     fun testRecurringWriteFullDayException() {
         val event = Event().apply {
             uid = "test1"
-            dtStart = DtStart("20190117T083000", DateUtils.ical4jTimeZone("Europe/Berlin"))
+            dtStart = DtStart(TemporalAdapter.parse("20190117T083000", DateUtils.ical4jTimeZone("Europe/Berlin")!!.toZoneId()).temporal)
             summary = "Main event"
-            rRules += RRule("FREQ=DAILY;COUNT=5")
+            rRules += RRule<Temporal>("FREQ=DAILY;COUNT=5")
             exceptions += arrayOf(
                     Event().apply {
                         uid = "test2"
-                        recurrenceId = RecurrenceId(DateTime("20190118T073000", DateUtils.ical4jTimeZone("Europe/London")))
+                        recurrenceId = RecurrenceId(TemporalAdapter.parse("20190118T073000", DateUtils.ical4jTimeZone("Europe/London")!!.toZoneId()).temporal)
                         summary = "Normal exception"
                     },
                     Event().apply {
                         uid = "test3"
-                        recurrenceId = RecurrenceId(Date("20190223"))
+                        recurrenceId = RecurrenceId(LocalDate.parse("20190223", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
                         summary = "Full-day exception"
                     }
             )
@@ -168,40 +204,40 @@ class EventTest {
     fun testStartEndTimes() {
         // event with start+end date-time
         val eViennaEvolution = parseCalendar("vienna-evolution.ics").first()
-        assertEquals(1381330800000L, eViennaEvolution.dtStart!!.date.time)
-        assertEquals("Europe/Vienna", eViennaEvolution.dtStart!!.timeZone.id)
-        assertEquals(1381334400000L, eViennaEvolution.dtEnd!!.date.time)
-        assertEquals("Europe/Vienna", eViennaEvolution.dtEnd!!.timeZone.id)
+        assertEquals(1381330800000L, eViennaEvolution.dtStart!!.date.toTimestamp())
+        assertEquals("Europe/Vienna", DateUtils.tzId(eViennaEvolution.dtStart))
+        assertEquals(1381334400000L, eViennaEvolution.dtEnd!!.date.toTimestamp())
+        assertEquals("Europe/Vienna", DateUtils.tzId(eViennaEvolution.dtEnd))
     }
 
     @Test
     fun testStartEndTimesAllDay() {
         // event with start date only
         val eOnThatDay = parseCalendar("event-on-that-day.ics").first()
-        assertEquals(868838400000L, eOnThatDay.dtStart!!.date.time)
-        assertNull(eOnThatDay.dtStart!!.timeZone)
+        assertEquals(868838400000L, eOnThatDay.dtStart!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eOnThatDay.dtStart))
 
         // event with start+end date for all-day event (one day)
         val eAllDay1Day = parseCalendar("all-day-1day.ics").first()
-        assertEquals(868838400000L, eAllDay1Day.dtStart!!.date.time)
-        assertNull(eAllDay1Day.dtStart!!.timeZone)
-        assertEquals(868838400000L + 86400000, eAllDay1Day.dtEnd!!.date.time)
-        assertNull(eAllDay1Day.dtEnd!!.timeZone)
+        assertEquals(868838400000L, eAllDay1Day.dtStart!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay1Day.dtStart))
+        assertEquals(868838400000L + 86400000, eAllDay1Day.dtEnd!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay1Day.dtEnd))
 
         // event with start+end date for all-day event (ten days)
         val eAllDay10Days = parseCalendar("all-day-10days.ics").first()
-        assertEquals(868838400000L, eAllDay10Days.dtStart!!.date.time)
-        assertNull(eAllDay10Days.dtStart!!.timeZone)
-        assertEquals(868838400000L + 10 * 86400000, eAllDay10Days.dtEnd!!.date.time)
-        assertNull(eAllDay10Days.dtEnd!!.timeZone)
+        assertEquals(868838400000L, eAllDay10Days.dtStart!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay10Days.dtStart))
+        assertEquals(868838400000L + 10 * 86400000, eAllDay10Days.dtEnd!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay10Days.dtEnd))
 
         // event with start+end date on some day (0 sec-event)
         val eAllDay0Sec = parseCalendar("all-day-0sec.ics").first()
-        assertEquals(868838400000L, eAllDay0Sec.dtStart!!.date.time)
-        assertNull(eAllDay0Sec.dtStart!!.timeZone)
+        assertEquals(868838400000L, eAllDay0Sec.dtStart!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay0Sec.dtStart))
         // DTEND is same as DTSTART which is not valid for Android – but this will be handled by AndroidEvent, not Event
-        assertEquals(868838400000L, eAllDay0Sec.dtEnd!!.date.time)
-        assertNull(eAllDay0Sec.dtEnd!!.timeZone)
+        assertEquals(868838400000L, eAllDay0Sec.dtEnd!!.date.toTimestamp())
+        assertNull(DateUtils.tzId(eAllDay0Sec.dtEnd))
     }
 
     @Test
@@ -226,8 +262,8 @@ class EventTest {
     fun testWrite() {
         val e = Event()
         e.uid = "SAMPLEUID"
-        e.dtStart = DtStart("20190101T100000", TimeZoneRegistryFactory.getInstance().createRegistry().getTimeZone("Europe/Berlin"))
-        e.alarms += VAlarm(Duration.ofHours(-1))
+        e.dtStart = DtStart(TemporalAdapter.parse("20190101T100000", TimeZoneRegistryFactory.getInstance().createRegistry().getTimeZone("Europe/Berlin")!!.toZoneId()).temporal)
+        e.alarms += VAlarm(Duration.ofHours(-1)).apply { this += ImmutableAction.AUDIO }
 
         val os = ByteArrayOutputStream()
         e.write(os)
@@ -237,10 +273,20 @@ class EventTest {
         assertTrue(raw.contains("UID:SAMPLEUID"))
         assertTrue(raw.contains("DTSTART;TZID=Europe/Berlin:20190101T100000"))
         assertTrue(raw.contains("DTSTAMP:"))
-        assertTrue(raw.contains("BEGIN:VALARM\r\n" +
-                "TRIGGER:-PT1H\r\n" +
-                "END:VALARM\r\n"))
+        val alarm = Event.eventsFromReader(StringReader(raw)).single().alarms.single()
+        assertEquals(ImmutableAction.AUDIO, alarm.getRequiredProperty<Action>("ACTION"))
+        assertEquals(Duration.ofHours(-1), alarm.getRequiredProperty<Trigger>("TRIGGER").duration)
         assertTrue(raw.contains("BEGIN:VTIMEZONE"))
+    }
+
+    @Test(expected = ValidationException::class)
+    fun testWriteRejectsAlarmWithoutAction() {
+        val event = Event().apply {
+            uid = "invalid-alarm@example.com"
+            dtStart = DtStart(LocalDateTime.of(2020, 1, 1, 12, 0))
+            alarms += VAlarm(Duration.ofMinutes(-30))
+        }
+        event.write(ByteArrayOutputStream())
     }
 
 

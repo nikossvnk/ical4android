@@ -1,5 +1,5 @@
 
-[![build status](https://gitlab.com/bitfireAT/ical4android/badges/master/build.svg)](https://gitlab.com/bitfireAT/ical4android/builds)
+[![build status](https://github.com/nikossvnk/ical4android/actions/workflows/check.yml/badge.svg)](https://github.com/nikossvnk/ical4android/actions/workflows/check.yml)
 
 
 # ical4android
@@ -26,17 +26,34 @@ Discussion: https://forums.bitfire.at/category/18/libraries
 
 ## How to use
 
-You can use [jitpack.io to include ical4android](https://jitpack.io/#com.gitlab.bitfireAT/ical4android):
+This maintained fork is consumed as a source submodule by
+[`etesync-android`](https://github.com/nikossvnk/etesync-android). Include
+`:ical4android` in your Gradle settings and use
+`implementation(project(":ical4android"))`. Repositories belong in the consuming
+project's settings (Google and Maven Central); no JitPack repository is required.
 
-    allprojects {
-        repositories {
-            maven { url 'https://jitpack.io' }
-        }
-    }
-    dependencies {
-        implementation 'com.gitlab.bitfireAT:ical4android:<version>'  // see tags for latest version, like 1.0
-        //implementation 'com.gitlab.bitfireAT:ical4android:master-SNAPSHOT'  // alternative
-    }
+## Development and API migration
+
+Use JDK 25, the included Gradle 9.8.2 wrapper, and Android SDK Platform 37.0.
+The module uses AGP 9.5.0, built-in Kotlin 2.4.21, Java 17 bytecode, minSdk 23,
+and core-library desugaring.
+
+```sh
+./gradlew build compileDebugAndroidTestKotlin
+./gradlew connectedCheck
+```
+
+The ical4j 4.4.0 migration replaces `Date`/`DateTime` with `java.time` temporals.
+Keep all-day `LocalDate` values distinct from instants/zoned date-times.
+Property/component lookups return typed `Optional` values; retain the returned
+value when modifying immutable-style property and parameter lists.
+`util/TimeApiExtensions.kt` centralizes temporal conversion and duration handling.
+
+JUnit4 JVM tests cover parsing, serialization, recurrences, timezones and alarms.
+Instrumented tests exercise Android providers and require contacts/calendar
+permissions. Task-provider cases need Tasks.org/OpenTasks. CI builds, lints,
+runs JVM tests, and compiles instrumentation; it does not execute device tests.
+Dependabot and scheduled CI run weekly.
 
 
 

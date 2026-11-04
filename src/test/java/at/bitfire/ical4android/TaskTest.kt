@@ -8,11 +8,19 @@
 
 package at.bitfire.ical4android
 
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.temporal.Temporal
+
 import net.fortuna.ical4j.model.*
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.parameter.RelType
-import net.fortuna.ical4j.model.parameter.Value
 import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.model.parameter.Value
+import net.fortuna.ical4j.model.property.immutable.ImmutableAction
+import net.fortuna.ical4j.model.property.immutable.ImmutableClazz
+import net.fortuna.ical4j.model.property.immutable.ImmutableStatus
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -36,6 +44,9 @@ class TaskTest {
         t = parseCalendarFile("utf8.ics")
         assertEquals("© äö — üß", t.summary)
         assertEquals("中华人民共和国", t.location)
+        assertEquals(LocalDateTime.of(2013, 10, 9, 17, 0), t.dtStart!!.date)
+        assertFalse(t.dtStart!!.isUtc)
+        assertNull(DateUtils.tzId(t.dtStart))
     }
 
     @Test
@@ -50,8 +61,8 @@ class TaskTest {
                 "END:VCALENDAR\r\n")
         assertEquals("DTSTART is DATE, but DUE is DATE-TIME", t.summary)
         // rewrite DTSTART to DATE-TIME, too
-        assertEquals(DtStart(DateTime("20200731T000000", tzVienna)), t.dtStart)
-        assertEquals(Due(DateTime("20200731T234600", tzVienna)), t.due)
+        assertEquals(DtStart(TemporalAdapter.parse("20200731T000000", tzVienna.toZoneId()).temporal), t.dtStart)
+        assertEquals(Due(TemporalAdapter.parse("20200731T234600", tzVienna.toZoneId()).temporal), t.due)
     }
 
     @Test
@@ -66,8 +77,8 @@ class TaskTest {
                 "END:VCALENDAR\r\n")
         assertEquals("DTSTART is DATE-TIME, but DUE is DATE", t.summary)
         // rewrite DTSTART to DATE-TIME, too
-        assertEquals(DtStart(DateTime("20200731T235510", tzVienna)), t.dtStart)
-        assertEquals(Due(DateTime("20200801T000000", tzVienna)), t.due)
+        assertEquals(DtStart(TemporalAdapter.parse("20200731T235510", tzVienna.toZoneId()).temporal), t.dtStart)
+        assertEquals(Due(TemporalAdapter.parse("20200801T000000", tzVienna.toZoneId()).temporal), t.due)
     }
 
     @Test
@@ -83,7 +94,7 @@ class TaskTest {
         assertEquals("DUE before DTSTART", t.summary)
         // invalid tasks with DUE before DTSTART: DTSTART should be set to null
         assertNull(t.dtStart)
-        assertEquals(Due(DateTime("20200731T123000", tzVienna)), t.due)
+        assertEquals(Due(TemporalAdapter.parse("20200731T123000", tzVienna.toZoneId()).temporal), t.due)
     }
 
     @Test
@@ -119,9 +130,9 @@ class TaskTest {
         assertEquals(2, t.sequence)
         assertEquals("uid4@example.com", t.uid)
         assertEquals("mailto:unclesam@example.com", t.organizer!!.value)
-        assertEquals(Due("19980415T000000"), t.due)
+        assertEquals(Due(LocalDateTime.parse("19980415T000000", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))), t.due)
         assertFalse(t.isAllDay())
-        assertEquals(Status.VTODO_NEEDS_ACTION, t.status)
+        assertEquals(ImmutableStatus.VTODO_NEEDS_ACTION, t.status)
         assertEquals("Submit Income Taxes", t.summary)
     }
 
@@ -140,20 +151,26 @@ class TaskTest {
         assertEquals("http://example.com/principals/jsmith", t.organizer!!.value)
         assertEquals("http://example.com/pub/calendars/jsmith/mytime.ics", t.url)
         assertEquals(1, t.priority)
-        assertEquals(Clazz.CONFIDENTIAL, t.classification)
-        assertEquals(Status.VTODO_IN_PROCESS, t.status)
+        assertEquals(ImmutableClazz.CONFIDENTIAL, t.classification)
+        assertEquals(ImmutableStatus.VTODO_IN_PROCESS, t.status)
         assertEquals(25, t.percentComplete)
-        assertEquals(DtStart(Date("20100101")), t.dtStart)
-        assertEquals(Due(Date("20101001")), t.due)
+        assertEquals(DtStart(LocalDate.parse("20100101", java.time.format.DateTimeFormatter.BASIC_ISO_DATE)), t.dtStart)
+        assertEquals(Due(LocalDate.parse("20101001", java.time.format.DateTimeFormatter.BASIC_ISO_DATE)), t.due)
         assertTrue(t.isAllDay())
 
-        assertEquals(RRule("FREQ=YEARLY;INTERVAL=2"), t.rRule)
+        assertEquals(RRule<Temporal>("FREQ=YEARLY;INTERVAL=2"), t.rRule)
         assertEquals(2, t.exDates.size)
-        assertTrue(t.exDates.contains(ExDate(DateList("20120101", Value.DATE))))
-        assertTrue(t.exDates.contains(ExDate(DateList("20140101,20180101", Value.DATE))))
+        assertTrue(t.exDates.all { it.getParameter<Value>(Parameter.VALUE).get() == Value.DATE })
+        assertEquals(setOf(
+                listOf(LocalDate.of(2012, 1, 1)),
+                listOf(LocalDate.of(2014, 1, 1), LocalDate.of(2018, 1, 1))
+        ), t.exDates.map { it.dates }.toSet())
         assertEquals(2, t.rDates.size)
-        assertTrue(t.rDates.contains(RDate(DateList("20100310,20100315", Value.DATE))))
-        assertTrue(t.rDates.contains(RDate(DateList("20100810", Value.DATE))))
+        assertTrue(t.rDates.all { it.getParameter<Value>(Parameter.VALUE).get() == Value.DATE })
+        assertEquals(setOf(
+                listOf(LocalDate.of(2010, 3, 10), LocalDate.of(2010, 3, 15)),
+                listOf(LocalDate.of(2010, 8, 10))
+        ), t.rDates.map { it.dates }.toSet())
 
         assertEquals(828106200000L, t.createdAt)
         assertEquals(840288600000L, t.lastModified)
@@ -162,18 +179,18 @@ class TaskTest {
 
         val sibling = t.relatedTo.first
         assertEquals("most-fields2@example.com", sibling.value)
-        assertEquals(RelType.SIBLING, (sibling.getParameter(Parameter.RELTYPE) as RelType))
+        assertEquals(RelType.SIBLING, sibling.getParameter<RelType>(Parameter.RELTYPE).get())
 
         val unknown = t.unknownProperties.first
         assertEquals("X-UNKNOWN-PROP", unknown.name)
-        assertEquals("xxx", unknown.getParameter<Parameter>("param1").value)
+        assertEquals("xxx", unknown.getParameter<Parameter>("param1").get().value)
         assertEquals("Unknown Value", unknown.value)
 
         // other file
         t = regenerate(parseCalendarFile("most-fields2.ics"))
         assertEquals("most-fields2@example.com", t.uid)
-        assertEquals(DtStart(DateTime("20100101T101010Z")), t.dtStart)
-        assertEquals(Duration(java.time.Duration.ofSeconds(4*86400 + 3*3600 + 2*60 + 1) /*Dur(4, 3, 2, 1)*/), t.duration)
+        assertEquals(DtStart(Instant.parse("2010-01-01T10:10:10Z")), t.dtStart)
+        assertEquals(Duration(java.time.Duration.ofDays(4).plusHours(3).plusMinutes(2).plusSeconds(1)), t.duration)
         assertTrue(t.unknownProperties.isEmpty())
     }
 
@@ -184,10 +201,10 @@ class TaskTest {
     fun testWrite() {
         val t = Task()
         t.uid = "SAMPLEUID"
-        t.dtStart = DtStart("20190101T100000", TimeZoneRegistryFactory.getInstance().createRegistry().getTimeZone("Europe/Berlin"))
+        t.dtStart = DtStart(TemporalAdapter.parse("20190101T100000", TimeZoneRegistryFactory.getInstance().createRegistry().getTimeZone("Europe/Berlin")!!.toZoneId()).temporal)
 
-        val alarm = VAlarm(java.time.Duration.ofHours(-1) /*Dur(0, -1, 0, 0)*/)
-        alarm.properties += Action.AUDIO
+        val alarm = VAlarm(java.time.Duration.ofHours(-1))
+        alarm += ImmutableAction.AUDIO
         t.alarms += alarm
 
         val os = ByteArrayOutputStream()
@@ -214,26 +231,26 @@ class TaskTest {
 
         // DTSTART has priority
         assertFalse(Task().apply {
-            dtStart = DtStart(DateTime())
+            dtStart = DtStart(Instant.now())
         }.isAllDay())
         assertFalse(Task().apply {
-            dtStart = DtStart(DateTime())
-            due = Due(Date())
+            dtStart = DtStart(Instant.now())
+            due = Due(LocalDate.now())
         }.isAllDay())
         assertTrue(Task().apply {
-            dtStart = DtStart(Date())
+            dtStart = DtStart(LocalDate.now())
         }.isAllDay())
         assertTrue(Task().apply {
-            dtStart = DtStart(Date())
-            due = Due(DateTime())
+            dtStart = DtStart(LocalDate.now())
+            due = Due(Instant.now())
         }.isAllDay())
 
         // if DTSTART is missing, DUE decides
         assertFalse(Task().apply {
-            due = Due(DateTime())
+            due = Due(Instant.now())
         }.isAllDay())
         assertTrue(Task().apply {
-            due = Due(Date())
+            due = Due(LocalDate.now())
         }.isAllDay())
     }
 

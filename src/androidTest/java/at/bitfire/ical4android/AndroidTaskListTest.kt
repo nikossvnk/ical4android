@@ -73,7 +73,7 @@ class AndroidTaskListTest(providerName: TaskProvider.ProviderName):
             val child = Task()
             child.uid = "child"
             child.summary = "Child task"
-            child.relatedTo.add(RelatedTo(parent.uid))
+            child.relatedTo.add(RelatedTo(parent.uid!!))
 
             // insert child before parent
             val childContentUri = TestTask(taskList, child).add()

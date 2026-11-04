@@ -8,6 +8,7 @@ import net.fortuna.ical4j.model.parameter.CuType
 import net.fortuna.ical4j.model.parameter.Email
 import net.fortuna.ical4j.model.parameter.Role
 import net.fortuna.ical4j.model.property.Attendee
+import kotlin.jvm.optionals.getOrNull
 
 /**
  * Defines mappings between Android [CalendarContract.Attendees] and iCalendar parameters.
@@ -74,9 +75,9 @@ object AttendeeMappings {
         }
 
         if (cuType != null && cuType != CuType.INDIVIDUAL)
-            attendee.parameters.add(cuType)
+            attendee += cuType
         if (role != null && role != Role.REQ_PARTICIPANT)
-            attendee.parameters.add(role)
+            attendee += role
     }
 
 
@@ -106,8 +107,8 @@ object AttendeeMappings {
         val type: Int
         var relationship: Int
 
-        val cuType = attendee.getParameter<CuType>(Parameter.CUTYPE) ?: CuType.INDIVIDUAL
-        val role = attendee.getParameter<Role>(Parameter.ROLE) ?: Role.REQ_PARTICIPANT
+        val cuType = attendee.getParameter<CuType>(Parameter.CUTYPE).getOrNull() ?: CuType.INDIVIDUAL
+        val role = attendee.getParameter<Role>(Parameter.ROLE).getOrNull() ?: Role.REQ_PARTICIPANT
 
         when (cuType) {
             CuType.RESOURCE -> {
@@ -154,7 +155,7 @@ object AttendeeMappings {
             val email = if (uri.scheme.equals("mailto", true))
                 uri.schemeSpecificPart
             else
-                attendee.getParameter<Email>(Parameter.EMAIL)?.value
+                attendee.getParameter<Email>(Parameter.EMAIL).getOrNull()?.value
             if (email == owner)
                 relationship = Attendees.RELATIONSHIP_ORGANIZER
         }

@@ -12,27 +12,54 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.net.Uri
 import android.os.RemoteException
+import android.util.Patterns
 import androidx.annotation.CallSuper
 import at.bitfire.ical4android.BatchOperation.CpoBuilder
 import at.bitfire.ical4android.MiscUtils.CursorHelper.toValues
 import at.bitfire.ical4android.util.AndroidTimeUtils
-import net.fortuna.ical4j.model.*
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.TimeZone
+import at.bitfire.ical4android.util.TimeApiExtensions.toTimestamp
+import net.fortuna.ical4j.model.Parameter
+import net.fortuna.ical4j.model.Property
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.parameter.Email
 import net.fortuna.ical4j.model.parameter.RelType
 import net.fortuna.ical4j.model.parameter.Related
-import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.model.property.Action
+import net.fortuna.ical4j.model.property.Attendee
+import net.fortuna.ical4j.model.property.Completed
+import net.fortuna.ical4j.model.property.DateProperty
+import net.fortuna.ical4j.model.property.Description
+import net.fortuna.ical4j.model.property.DtStart
+import net.fortuna.ical4j.model.property.Due
+import net.fortuna.ical4j.model.property.Duration
+import net.fortuna.ical4j.model.property.ExDate
+import net.fortuna.ical4j.model.property.Geo
+import net.fortuna.ical4j.model.property.Organizer
+import net.fortuna.ical4j.model.property.RDate
+import net.fortuna.ical4j.model.property.RRule
+import net.fortuna.ical4j.model.property.RelatedTo
+import net.fortuna.ical4j.model.property.Summary
+import net.fortuna.ical4j.model.property.Trigger
+import net.fortuna.ical4j.model.property.immutable.ImmutableAction
+import net.fortuna.ical4j.model.property.immutable.ImmutableClazz
+import net.fortuna.ical4j.model.property.immutable.ImmutableStatus
 import net.fortuna.ical4j.util.TimeZones
 import org.dmfs.tasks.contract.TaskContract.Properties
-import org.dmfs.tasks.contract.TaskContract.Property.*
+import org.dmfs.tasks.contract.TaskContract.Property.Alarm
+import org.dmfs.tasks.contract.TaskContract.Property.Category
+import org.dmfs.tasks.contract.TaskContract.Property.Relation
 import org.dmfs.tasks.contract.TaskContract.Tasks
 import java.io.FileNotFoundException
+import java.net.URI
 import java.net.URISyntaxException
+import java.time.Instant
 import java.time.ZoneId
-import java.util.*
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.Temporal
+import java.util.Locale
 import java.util.logging.Level
+import kotlin.jvm.optionals.getOrNull
 
 /**
  * Stores and retrieves VTODO iCalendar objects (represented as [Task]s) to/from the
@@ -50,8 +77,6 @@ abstract class AndroidTask(
 
     companion object {
         const val UNKNOWN_PROPERTY_DATA = Properties.DATA0
-
-        val utcTimeZone by lazy { DateUtils.ical4jTimeZone(TimeZones.UTC_ID) }
     }
 
     var id: Long? = null
@@ -105,7 +130,7 @@ abstract class AndroidTask(
                         val relatedToList = newTask.relatedTo
                         values.getAsLong(Tasks.PARENT_ID)?.let { parentId ->
                             val hasParentRelation = relatedToList.any { relatedTo ->
-                                val relatedType = relatedTo.getParameter<RelType>(Parameter.RELTYPE)
+                                val relatedType = relatedTo.getParameter<RelType>(Parameter.RELTYPE).getOrNull()
                                 relatedType == RelType.PARENT || relatedType == null /* RelType.PARENT is the default value */
                             }
                             if (!hasParentRelation) {
@@ -147,7 +172,7 @@ abstract class AndroidTask(
             val (lng, lat) = geo.split(',')
             try {
                 task.geoPosition = Geo(lat.toBigDecimal(), lng.toBigDecimal())
-            } catch (e: NumberFormatException) {
+            } catch (_: NumberFormatException) {
                 Ical4Android.log.warning("Invalid GEO value: $geo")
             }
         }
@@ -167,60 +192,35 @@ abstract class AndroidTask(
         values.getAsInteger(Tasks.PRIORITY)?.let { task.priority = it }
 
         task.classification = when (values.getAsInteger(Tasks.CLASSIFICATION)) {
-            Tasks.CLASSIFICATION_PUBLIC ->       Clazz.PUBLIC
-            Tasks.CLASSIFICATION_PRIVATE ->      Clazz.PRIVATE
-            Tasks.CLASSIFICATION_CONFIDENTIAL -> Clazz.CONFIDENTIAL
+            Tasks.CLASSIFICATION_PUBLIC ->       ImmutableClazz.PUBLIC
+            Tasks.CLASSIFICATION_PRIVATE ->      ImmutableClazz.PRIVATE
+            Tasks.CLASSIFICATION_CONFIDENTIAL -> ImmutableClazz.CONFIDENTIAL
             else ->                              null
         }
 
-        values.getAsLong(Tasks.COMPLETED)?.let { task.completedAt = Completed(DateTime(it)) }
+        values.getAsLong(Tasks.COMPLETED)?.let { task.completedAt = Completed(Instant.ofEpochMilli(it)) }
         values.getAsInteger(Tasks.PERCENT_COMPLETE)?.let { task.percentComplete = it }
 
         task.status = when (values.getAsInteger(Tasks.STATUS)) {
-            Tasks.STATUS_IN_PROCESS -> Status.VTODO_IN_PROCESS
-            Tasks.STATUS_COMPLETED ->  Status.VTODO_COMPLETED
-            Tasks.STATUS_CANCELLED ->  Status.VTODO_CANCELLED
-            else ->                    Status.VTODO_NEEDS_ACTION
+            Tasks.STATUS_IN_PROCESS -> ImmutableStatus.VTODO_IN_PROCESS
+            Tasks.STATUS_COMPLETED ->  ImmutableStatus.VTODO_COMPLETED
+            Tasks.STATUS_CANCELLED ->  ImmutableStatus.VTODO_CANCELLED
+            else ->                    ImmutableStatus.VTODO_NEEDS_ACTION
         }
 
-        val allDay = values.getAsInteger(Tasks.IS_ALLDAY) ?: 0 != 0
+        val allDay = (values.getAsInteger(Tasks.IS_ALLDAY) ?: 0) != 0
 
         val tzID = values.getAsString(Tasks.TZ)
-        val tz = tzID?.let { DateUtils.ical4jTimeZone(it) }
 
         values.getAsLong(Tasks.CREATED)?.let { task.createdAt = it }
         values.getAsLong(Tasks.LAST_MODIFIED)?.let { task.lastModified = it }
 
         values.getAsLong(Tasks.DTSTART)?.let { dtStart ->
-            task.dtStart =
-                    if (allDay)
-                        DtStart(Date(dtStart))
-                    else {
-                        val dt = DateTime(dtStart)
-                        if (tz == null)
-                            DtStart(dt, true)
-                        else
-                            DtStart(dt.apply {
-                                timeZone = tz
-                            })
-                    }
+            task.dtStart = DtStart(taskTemporal(dtStart, allDay, tzID))
         }
 
         values.getAsLong(Tasks.DUE)?.let { due ->
-            task.due =
-                    if (allDay)
-                        Due(Date(due))
-                    else {
-                        val dt = DateTime(due)
-                        if (tz == null)
-                            Due(dt).apply {
-                                isUtc = true
-                            }
-                        else
-                            Due(dt.apply {
-                                timeZone = tz
-                            })
-                    }
+            task.due = Due(taskTemporal(due, allDay, tzID))
         }
 
         values.getAsString(Tasks.DURATION)?.let { duration ->
@@ -228,15 +228,34 @@ abstract class AndroidTask(
             task.duration = Duration(fixedDuration)
         }
 
+        // OpenTasks stores RDATE/EXDATE values in the task's time zone (TZ column)
+        val recurrenceTzPrefix =
+                if (!allDay && tzID != null)
+                    tzID + AndroidTimeUtils.RECURRENCE_LIST_TZID_SEPARATOR
+                else
+                    ""
         values.getAsString(Tasks.RDATE)?.let {
-            task.rDates += AndroidTimeUtils.androidStringToRecurrenceSet(it, allDay) { dates -> RDate(dates) }
+            task.rDates += AndroidTimeUtils.androidStringToRecurrenceSet(recurrenceTzPrefix + it, allDay) { dates -> RDate(dates) }
         }
         values.getAsString(Tasks.EXDATE)?.let {
-            task.exDates += AndroidTimeUtils.androidStringToRecurrenceSet(it, allDay) { dates -> ExDate(dates) }
+            task.exDates += AndroidTimeUtils.androidStringToRecurrenceSet(recurrenceTzPrefix + it, allDay) { dates -> ExDate(dates) }
         }
 
-        values.getAsString(Tasks.RRULE)?.let { task.rRule = RRule(it) }
+        values.getAsString(Tasks.RRULE)?.let { task.rRule = RRule<Temporal>(it) }
     }
+
+    /**
+     * Creates a DATE (all-day) or DATE-TIME value from a task provider timestamp.
+     *
+     * @param timestamp     timestamp (milliseconds) from the task provider
+     * @param allDay        whether a DATE value shall be created
+     * @param tzId          time zone ID of the task; DATE-TIMEs without (known) time zone are UTC
+     */
+    private fun taskTemporal(timestamp: Long, allDay: Boolean, tzId: String?): Temporal =
+            if (allDay)
+                Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDate()
+            else
+                AndroidTimeUtils.androidDateTime(timestamp, tzId) ?: Instant.ofEpochMilli(timestamp)
 
     protected open fun populateProperty(row: ContentValues) {
         Ical4Android.log.log(Level.FINER, "Found property", row)
@@ -258,30 +277,41 @@ abstract class AndroidTask(
 
     protected open fun populateAlarm(row: ContentValues) {
         val task = requireNotNull(task)
-        val props = PropertyList<Property>()
+        val alarm = VAlarm()
 
         val trigger = Trigger(java.time.Duration.ofMinutes(-row.getAsLong(Alarm.MINUTES_BEFORE)))
         when (row.getAsInteger(Alarm.REFERENCE)) {
             Alarm.ALARM_REFERENCE_START_DATE ->
-                trigger.parameters.add(Related.START)
+                trigger += Related.START
             Alarm.ALARM_REFERENCE_DUE_DATE ->
-                trigger.parameters.add(Related.END)
+                trigger += Related.END
         }
-        props += trigger
+        alarm += trigger
 
-        props += when (row.getAsInteger(Alarm.ALARM_TYPE)) {
-            Alarm.ALARM_TYPE_EMAIL ->
-                Action.EMAIL
+        alarm += when (row.getAsInteger(Alarm.ALARM_TYPE)) {
+            Alarm.ALARM_TYPE_EMAIL -> {
+                val accountName = taskList.account.name
+                if (Patterns.EMAIL_ADDRESS.matcher(accountName).matches()) {
+                    // The provider has no recipient field; use the account owner's real email,
+                    // as AndroidEvent does for email reminders.
+                    alarm += Summary(task.summary.orEmpty())
+                    alarm += Attendee(URI("mailto", accountName, null))
+                    ImmutableAction.EMAIL
+                } else {
+                    Ical4Android.log.warning("Account name is not an email address; changing EMAIL reminder to DISPLAY")
+                    ImmutableAction.DISPLAY
+                }
+            }
             Alarm.ALARM_TYPE_SOUND ->
-                Action.AUDIO
+                ImmutableAction.AUDIO
             else ->
                 // show alarm by default
-                Action.DISPLAY
+                ImmutableAction.DISPLAY
         }
 
-        props += Description(row.getAsString(Alarm.MESSAGE) ?: task.summary)
+        alarm += Description(row.getAsString(Alarm.MESSAGE) ?: task.summary.orEmpty())
 
-        task.alarms += VAlarm(props)
+        task.alarms += alarm
     }
 
     protected open fun populateRelatedTo(row: ContentValues) {
@@ -294,14 +324,14 @@ abstract class AndroidTask(
         val relatedTo = RelatedTo(uid)
 
         // add relation type as reltypeparam
-        relatedTo.parameters.add(when (row.getAsInteger(Relation.RELATED_TYPE)) {
+        relatedTo += when (row.getAsInteger(Relation.RELATED_TYPE)) {
             Relation.RELTYPE_CHILD ->
                 RelType.CHILD
             Relation.RELTYPE_SIBLING ->
                 RelType.SIBLING
             else /* Relation.RELTYPE_PARENT, default value */ ->
                 RelType.PARENT
-        })
+        }
 
         requireNotNull(task).relatedTo.add(relatedTo)
     }
@@ -366,12 +396,12 @@ abstract class AndroidTask(
                     Alarm.ALARM_REFERENCE_START_DATE
             }
 
-            val alarmType = when (alarm.action?.value?.toUpperCase(Locale.ROOT)) {
-                Action.AUDIO.value ->
+            val alarmType = when (alarm.getProperty<Action>(Property.ACTION).getOrNull()?.value?.uppercase(Locale.ROOT)) {
+                Action.VALUE_AUDIO ->
                     Alarm.ALARM_TYPE_SOUND
-                Action.DISPLAY.value ->
+                Action.VALUE_DISPLAY ->
                     Alarm.ALARM_TYPE_MESSAGE
-                Action.EMAIL.value ->
+                Action.VALUE_EMAIL ->
                     Alarm.ALARM_TYPE_EMAIL
                 else ->
                     Alarm.ALARM_TYPE_NOTHING
@@ -383,7 +413,7 @@ abstract class AndroidTask(
                     .withValue(Alarm.MIMETYPE, Alarm.CONTENT_ITEM_TYPE)
                     .withValue(Alarm.MINUTES_BEFORE, minutes)
                     .withValue(Alarm.REFERENCE, ref)
-                    .withValue(Alarm.MESSAGE, alarm.description?.value ?: alarm.summary)
+                    .withValue(Alarm.MESSAGE, alarm.description?.value ?: alarm.summary?.value)
                     .withValue(Alarm.ALARM_TYPE, alarmType)
 
             Ical4Android.log.log(Level.FINE, "Inserting alarm", builder.build())
@@ -404,7 +434,7 @@ abstract class AndroidTask(
 
     protected open fun insertRelatedTo(batch: BatchOperation, idxTask: Int?) {
         for (relatedTo in requireNotNull(task).relatedTo) {
-            val relType = when ((relatedTo.getParameter(Parameter.RELTYPE) as RelType?)) {
+            val relType = when (relatedTo.getParameter<RelType>(Parameter.RELTYPE).getOrNull()) {
                 RelType.CHILD ->
                     Relation.RELTYPE_CHILD
                 RelType.SIBLING ->
@@ -447,7 +477,7 @@ abstract class AndroidTask(
     }
 
     @CallSuper
-    protected open fun buildTask(builder: BatchOperation.CpoBuilder, update: Boolean) {
+    protected open fun buildTask(builder: CpoBuilder, update: Boolean) {
         if (!update)
             builder .withValue(Tasks.LIST_ID, taskList.id)
 
@@ -470,7 +500,7 @@ abstract class AndroidTask(
             val email = if (uri.scheme.equals("mailto", true))
                 uri.schemeSpecificPart
             else
-                organizer.getParameter<Email>(Parameter.EMAIL)?.value
+                organizer.getParameter<Email>(Parameter.EMAIL).getOrNull()?.value
             if (email != null)
                 builder.withValue(Tasks.ORGANIZER, email)
             else
@@ -479,22 +509,22 @@ abstract class AndroidTask(
 
         builder .withValue(Tasks.PRIORITY, task.priority)
                 .withValue(Tasks.CLASSIFICATION, when (task.classification) {
-                    Clazz.PUBLIC -> Tasks.CLASSIFICATION_PUBLIC
-                    Clazz.CONFIDENTIAL -> Tasks.CLASSIFICATION_CONFIDENTIAL
+                    ImmutableClazz.PUBLIC -> Tasks.CLASSIFICATION_PUBLIC
+                    ImmutableClazz.CONFIDENTIAL -> Tasks.CLASSIFICATION_CONFIDENTIAL
                     null -> Tasks.CLASSIFICATION_DEFAULT
                     else -> Tasks.CLASSIFICATION_PRIVATE    // all unknown classifications MUST be treated as PRIVATE
                 })
 
         // COMPLETED must always be a DATE-TIME
-        builder .withValue(Tasks.COMPLETED, task.completedAt?.date?.time)
+        builder .withValue(Tasks.COMPLETED, task.completedAt?.date?.toEpochMilli())
                 .withValue(Tasks.COMPLETED_IS_ALLDAY, 0)
                 .withValue(Tasks.PERCENT_COMPLETE, task.percentComplete)
 
         val status = when (task.status) {
-            Status.VTODO_IN_PROCESS -> Tasks.STATUS_IN_PROCESS
-            Status.VTODO_COMPLETED  -> Tasks.STATUS_COMPLETED
-            Status.VTODO_CANCELLED  -> Tasks.STATUS_CANCELLED
-            else                    -> Tasks.STATUS_DEFAULT    // == Tasks.STATUS_NEEDS_ACTION
+            ImmutableStatus.VTODO_IN_PROCESS -> Tasks.STATUS_IN_PROCESS
+            ImmutableStatus.VTODO_COMPLETED  -> Tasks.STATUS_COMPLETED
+            ImmutableStatus.VTODO_CANCELLED  -> Tasks.STATUS_CANCELLED
+            else                             -> Tasks.STATUS_DEFAULT    // == Tasks.STATUS_NEEDS_ACTION
         }
         builder.withValue(Tasks.STATUS, status)
 
@@ -512,8 +542,8 @@ abstract class AndroidTask(
         builder .withValue(Tasks.CREATED, task.createdAt)
                 .withValue(Tasks.LAST_MODIFIED, task.lastModified)
 
-                .withValue(Tasks.DTSTART, task.dtStart?.date?.time)
-                .withValue(Tasks.DUE, task.due?.date?.time)
+                .withValue(Tasks.DTSTART, task.dtStart?.date?.toTimestamp())
+                .withValue(Tasks.DUE, task.due?.date?.toTimestamp())
                 .withValue(Tasks.DURATION, task.duration?.value)
 
                 .withValue(Tasks.RDATE,
@@ -532,25 +562,33 @@ abstract class AndroidTask(
     }
 
 
-    fun getTimeZone(): TimeZone {
+    /**
+     * Determines the time zone of the task, which is stored in [Tasks.TZ] and used for
+     * non-all-day RDATE/EXDATE values:
+     *
+     * - the time zone of DTSTART, if available (UTC for UTC date-times), otherwise
+     * - the time zone of DUE, if available (UTC for UTC date-times), otherwise
+     * - the system default time zone.
+     */
+    fun getTimeZone(): ZoneId {
         val task = requireNotNull(task)
-        return  task.dtStart?.let { dtStart ->
-                    if (dtStart.isUtc)
-                        utcTimeZone
-                    else
-                        dtStart.timeZone
-                } ?:
-                task.due?.let { due ->
-                    if (due.isUtc)
-                        utcTimeZone
-                    else
-                        due.timeZone
-                } ?:
-                DateUtils.ical4jTimeZone(ZoneId.systemDefault().id)!!
+        return  task.dtStart?.let { zoneOf(it) } ?:
+                task.due?.let { zoneOf(it) } ?:
+                ZoneId.systemDefault()
+    }
+
+    private fun zoneOf(date: DateProperty<*>): ZoneId? {
+        val value: Temporal = date.date
+        return when {
+            !DateUtils.isDateTime(value) -> null
+            date.isUtc -> ZoneId.of(TimeZones.UTC_ID)
+            value is ZonedDateTime -> DateUtils.getZoneId(DateUtils.tzId(date)) ?: value.zone
+            else -> null
+        }
     }
 
 
-    protected fun CpoBuilder.withTaskId(column: String, idxTask: Int?): BatchOperation.CpoBuilder {
+    protected fun CpoBuilder.withTaskId(column: String, idxTask: Int?): CpoBuilder {
         if (idxTask != null)
             withValueBackReference(column, idxTask)
         else

@@ -11,20 +11,56 @@
 package at.bitfire.ical4android
 
 import androidx.annotation.IntRange
+import at.bitfire.ical4android.util.AndroidTimeUtils
+import at.bitfire.ical4android.util.TimeApiExtensions.toInstant
+import at.bitfire.ical4android.util.TimeApiExtensions.toLocalDate
 import net.fortuna.ical4j.data.CalendarOutputter
 import net.fortuna.ical4j.data.ParserException
-import net.fortuna.ical4j.model.*
 import net.fortuna.ical4j.model.Calendar
-import net.fortuna.ical4j.model.TimeZone
+import net.fortuna.ical4j.model.Component
+import net.fortuna.ical4j.model.ParameterList
+import net.fortuna.ical4j.model.Property
+import net.fortuna.ical4j.model.TextList
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.component.VToDo
-import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.model.property.Categories
+import net.fortuna.ical4j.model.property.Clazz
+import net.fortuna.ical4j.model.property.Color
+import net.fortuna.ical4j.model.property.Completed
+import net.fortuna.ical4j.model.property.Created
+import net.fortuna.ical4j.model.property.DateProperty
+import net.fortuna.ical4j.model.property.Description
+import net.fortuna.ical4j.model.property.DtStamp
+import net.fortuna.ical4j.model.property.DtStart
+import net.fortuna.ical4j.model.property.Due
+import net.fortuna.ical4j.model.property.Duration
+import net.fortuna.ical4j.model.property.ExDate
+import net.fortuna.ical4j.model.property.Geo
+import net.fortuna.ical4j.model.property.LastModified
+import net.fortuna.ical4j.model.property.Location
+import net.fortuna.ical4j.model.property.Organizer
+import net.fortuna.ical4j.model.property.PercentComplete
+import net.fortuna.ical4j.model.property.Priority
+import net.fortuna.ical4j.model.property.ProdId
+import net.fortuna.ical4j.model.property.RDate
+import net.fortuna.ical4j.model.property.RRule
+import net.fortuna.ical4j.model.property.RelatedTo
+import net.fortuna.ical4j.model.property.Sequence
+import net.fortuna.ical4j.model.property.Status
+import net.fortuna.ical4j.model.property.Summary
+import net.fortuna.ical4j.model.property.Uid
+import net.fortuna.ical4j.model.property.Url
+import net.fortuna.ical4j.model.property.immutable.ImmutableVersion
 import java.io.IOException
 import java.io.OutputStream
 import java.io.Reader
 import java.net.URI
 import java.net.URISyntaxException
-import java.util.*
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.Temporal
+import java.util.LinkedList
 import java.util.logging.Level
 
 class Task: ICalendar() {
@@ -41,22 +77,22 @@ class Task: ICalendar() {
     var organizer: Organizer? = null
 
     @IntRange(from = 0, to = 9)
-    var priority: Int = Priority.UNDEFINED.level
+    var priority: Int = Priority.VALUE_UNDEFINED
 
     var classification: Clazz? = null
     var status: Status? = null
 
-    var dtStart: DtStart? = null
-    var due: Due? = null
+    var dtStart: DtStart<*>? = null
+    var due: Due<*>? = null
     var duration: Duration? = null
     var completedAt: Completed? = null
 
     @IntRange(from = 0, to = 100)
     var percentComplete: Int? = null
 
-    var rRule: RRule? = null
-    val rDates = LinkedList<RDate>()
-    val exDates = LinkedList<ExDate>()
+    var rRule: RRule<*>? = null
+    val rDates = LinkedList<RDate<*>>()
+    val exDates = LinkedList<ExDate<*>>()
 
     val categories = LinkedList<String>()
     var relatedTo = LinkedList<RelatedTo>()
@@ -88,8 +124,9 @@ class Task: ICalendar() {
         private fun fromVToDo(todo: VToDo): Task {
             val t = Task()
 
-            if (todo.uid != null)
-                t.uid = todo.uid.value
+            val uid = todo.uid
+            if (uid.isPresent)
+                t.uid = uid.get().value
             else {
                 Ical4Android.log.warning("Received VTODO without UID, generating new one")
                 t.generateUID()
@@ -98,11 +135,11 @@ class Task: ICalendar() {
             // sequence must only be null for locally created, not-yet-synchronized events
             t.sequence = 0
 
-            for (prop in todo.properties)
+            for (prop in todo.getProperties<Property>())
                 when (prop) {
                     is Sequence -> t.sequence = prop.sequenceNo
-                    is Created -> t.createdAt = prop.dateTime.time
-                    is LastModified -> t.lastModified = prop.dateTime.time
+                    is Created -> t.createdAt = prop.date.toEpochMilli()
+                    is LastModified -> t.lastModified = prop.date.toEpochMilli()
                     is Summary -> t.summary = prop.value
                     is Location -> t.location = prop.value
                     is Geo -> t.geoPosition = prop
@@ -113,16 +150,16 @@ class Task: ICalendar() {
                     is Priority -> t.priority = prop.level
                     is Clazz -> t.classification = prop
                     is Status -> t.status = prop
-                    is Due -> { t.due = prop }
+                    is Due<*> -> { t.due = prop }
                     is Duration -> t.duration = prop
-                    is DtStart -> { t.dtStart = prop }
+                    is DtStart<*> -> { t.dtStart = prop }
                     is Completed -> { t.completedAt = prop }
                     is PercentComplete -> t.percentComplete = prop.percentage
-                    is RRule -> t.rRule = prop
-                    is RDate -> t.rDates += prop
-                    is ExDate -> t.exDates += prop
+                    is RRule<*> -> t.rRule = prop
+                    is RDate<*> -> t.rDates += prop
+                    is ExDate<*> -> t.exDates += prop
                     is Categories ->
-                        for (category in prop.categories)
+                        for (category in prop.categories.texts)
                             t.categories += category
                     is RelatedTo -> t.relatedTo.add(prop)
                     is Uid, is ProdId, is DtStamp -> { /* don't save these as unknown properties */ }
@@ -138,14 +175,15 @@ class Task: ICalendar() {
             if (dtStart != null && due != null) {
                 if (DateUtils.isDate(dtStart) && DateUtils.isDateTime(due)) {
                     Ical4Android.log.warning("DTSTART is DATE but DUE is DATE-TIME, rewriting DTSTART to DATE-TIME")
-                    t.dtStart = DtStart(DateTime(dtStart.value, due.timeZone))
+                    t.dtStart = DtStart(startOfDayLike(dtStart, due)).also { copyTzId(due, it) }
                 } else if (DateUtils.isDateTime(dtStart) && DateUtils.isDate(due)) {
                     Ical4Android.log.warning("DTSTART is DATE-TIME but DUE is DATE, rewriting DUE to DATE-TIME")
-                    t.due = Due(DateTime(due.value, dtStart.timeZone))
+                    t.due = Due(startOfDayLike(due, dtStart)).also { copyTzId(dtStart, it) }
                 }
 
-
-                if (due.date <= dtStart.date) {
+                val newDtStart = t.dtStart
+                val newDue = t.due
+                if (newDtStart != null && newDue != null && newDue.date.toInstant() <= newDtStart.date.toInstant()) {
                     Ical4Android.log.warning("Found invalid DUE <= DTSTART; dropping DTSTART")
                     t.dtStart = null
                 }
@@ -159,6 +197,29 @@ class Task: ICalendar() {
             return t
         }
 
+        /**
+         * Converts the DATE value of [date] to a DATE-TIME (start of the day) of the same kind as
+         * [reference] (UTC, with time zone or floating).
+         */
+        private fun startOfDayLike(date: DateProperty<*>, reference: DateProperty<*>): Temporal {
+            val day = date.date.toLocalDate()
+            val referenceValue: Temporal = reference.date
+            return when {
+                reference.isUtc -> day.atStartOfDay(ZoneOffset.UTC).toInstant()
+                referenceValue is ZonedDateTime -> day.atStartOfDay(referenceValue.zone)
+                else -> day.atStartOfDay()
+            }
+        }
+
+        /**
+         * Applies the TZID of [from] (if there is one) to [to].
+         */
+        private fun copyTzId(from: DateProperty<*>, to: DateProperty<*>) {
+            DateUtils.tzId(from)?.let { tzId ->
+                AndroidTimeUtils.setDate(to, to.date, tzId)
+            }
+        }
+
     }
 
 
@@ -167,79 +228,76 @@ class Task: ICalendar() {
         Ical4Android.checkThreadContextClassLoader()
 
         val ical = Calendar()
-        ical.properties += Version.VERSION_2_0
-        ical.properties += prodId
+        ical += ImmutableVersion.VERSION_2_0
+        ical += prodId
 
         val vTodo = VToDo(true /* generates DTSTAMP */)
-        ical.components += vTodo
-        val props = vTodo.properties
+        ical += vTodo
 
-        uid?.let { props += Uid(uid) }
+        uid?.let { vTodo += Uid(it) }
         sequence?.let {
             if (it != 0)
-                props += Sequence(it)
+                vTodo += Sequence(it)
         }
 
-        createdAt?.let { props += Created(DateTime(it)) }
-        lastModified?.let { props += LastModified(DateTime(it)) }
+        createdAt?.let { vTodo += Created(Instant.ofEpochMilli(it)) }
+        lastModified?.let { vTodo += LastModified(Instant.ofEpochMilli(it)) }
 
-        summary?.let { props += Summary(it) }
-        location?.let { props += Location(it) }
-        geoPosition?.let { props += it }
-        description?.let { props += Description(it) }
-        color?.let { props += Color(null, Css3Color.nearestMatch(it).name) }
+        summary?.let { vTodo += Summary(it) }
+        location?.let { vTodo += Location(it) }
+        geoPosition?.let { vTodo += it }
+        description?.let { vTodo += Description(it) }
+        color?.let { vTodo += Color(ParameterList(), Css3Color.nearestMatch(it).name) }
         url?.let {
             try {
-                props += Url(URI(it))
+                vTodo += Url(URI(it))
             } catch (e: URISyntaxException) {
                 Ical4Android.log.log(Level.WARNING, "Ignoring invalid task URL: $url", e)
             }
         }
-        organizer?.let { props += it }
+        organizer?.let { vTodo += it }
 
-        if (priority != Priority.UNDEFINED.level)
-            props += Priority(priority)
-        classification?.let { props += it }
-        status?.let { props += it }
+        if (priority != Priority.VALUE_UNDEFINED)
+            vTodo += Priority(priority)
+        classification?.let { vTodo += it }
+        status?.let { vTodo += it }
 
-        rRule?.let { props += it }
-        rDates.forEach { props += it }
-        exDates.forEach { props += it }
+        rRule?.let { vTodo += it }
+        rDates.forEach { vTodo += it }
+        exDates.forEach { vTodo += it }
 
         if (categories.isNotEmpty())
-            props += Categories(TextList(categories.toTypedArray()))
-        props.addAll(relatedTo)
-        props.addAll(unknownProperties)
+            vTodo += Categories(TextList(categories))
+        relatedTo.forEach { vTodo += it }
+        unknownProperties.forEach { vTodo += it }
 
         // remember used time zones
-        val usedTimeZones = HashSet<TimeZone>()
+        val usedTimeZones = HashSet<String>()
         due?.let {
-            props += it
-            it.timeZone?.let(usedTimeZones::add)
+            vTodo += it
+            DateUtils.tzId(it)?.let(usedTimeZones::add)
         }
-        duration?.let(props::add)
+        duration?.let { vTodo += it }
         dtStart?.let {
-            props += it
-            it.timeZone?.let(usedTimeZones::add)
+            vTodo += it
+            DateUtils.tzId(it)?.let(usedTimeZones::add)
         }
-        completedAt?.let {
-            props += it
-            it.timeZone?.let(usedTimeZones::add)
-        }
-        percentComplete?.let { props += PercentComplete(it) }
+        completedAt?.let { vTodo += it }
+        percentComplete?.let { vTodo += PercentComplete(it) }
 
-        if (alarms.isNotEmpty())
-            vTodo.alarms.addAll(alarms)
+        alarms.forEach { vTodo += it }
 
         // determine earliest referenced date
-        val earliest = arrayOf(
+        val earliest = listOfNotNull<Temporal>(
                 dtStart?.date,
                 due?.date,
                 completedAt?.date
-        ).filterNotNull().minOrNull()
+        ).minByOrNull { it.toInstant() }
         // add VTIMEZONE components
-        for (tz in usedTimeZones)
-            ical.components += minifyVTimeZone(tz.vTimeZone, earliest)
+        for (tzId in usedTimeZones)
+            DateUtils.ical4jTimeZone(tzId)?.let { tz ->
+                ical += minifyVTimeZone(tz.vTimeZone, earliest)
+            }
 
         softValidate(ical)
         CalendarOutputter(false).output(ical, os)

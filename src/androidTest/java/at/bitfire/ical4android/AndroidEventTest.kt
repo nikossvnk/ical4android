@@ -7,6 +7,13 @@
  */
 package at.bitfire.ical4android
 
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.temporal.Temporal
+import at.bitfire.ical4android.util.TimeApiExtensions.toTimestamp
+import at.bitfire.ical4android.util.TimeApiExtensions.toInstant
+
 import android.Manifest
 import android.accounts.Account
 import android.content.ContentUris
@@ -23,10 +30,13 @@ import at.bitfire.ical4android.impl.TestCalendar
 import at.bitfire.ical4android.impl.TestEvent
 import at.bitfire.ical4android.util.AndroidTimeUtils
 import net.fortuna.ical4j.model.*
-import net.fortuna.ical4j.model.Date
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.parameter.*
 import net.fortuna.ical4j.model.property.*
+import net.fortuna.ical4j.model.property.Duration as IcalDuration
+import net.fortuna.ical4j.model.property.immutable.ImmutableAction
+import net.fortuna.ical4j.model.property.immutable.ImmutableClazz
+import net.fortuna.ical4j.model.property.immutable.ImmutableStatus
 import net.fortuna.ical4j.util.TimeZones
 import org.junit.After
 import org.junit.Assert.*
@@ -108,7 +118,7 @@ class AndroidEventTest {
     private fun buildEvent(automaticDates: Boolean, eventBuilder: Event.() -> Unit): ContentValues {
         val event = Event().apply {
             if (automaticDates)
-                dtStart = DtStart(DateTime())
+                dtStart = DtStart(Instant.now())
             eventBuilder()
         }
         val uri = TestEvent(calendar, event).add()
@@ -133,7 +143,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_NoDtEnd_NoDuration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -147,10 +157,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_NoDtEnd_NoDuration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            rRules += RRule("FREQ=DAILY;COUNT=5")
-            rRules += RRule("FREQ=WEEKLY;COUNT=10")
-            rDates += RDate(DateList("20210601T123000", Value.DATE_TIME, tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            rRules += RRule<Temporal>("FREQ=DAILY;COUNT=5")
+            rRules += RRule<Temporal>("FREQ=WEEKLY;COUNT=10")
+            rDates += RDate(DateList.parse("20210601T123000", tzVienna!!.toZoneId()))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -168,8 +178,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_NoDtEnd_Duration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            duration = Duration(null, "PT1H30M")
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            duration = IcalDuration("PT1H30M")
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -184,8 +194,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDayUtc_NoDtEnd_Duration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(DateTime("20200601T103000Z").apply { isUtc = true })
-            duration = Duration(null, "PT1H30M")
+            dtStart = DtStart(Instant.parse("2020-06-01T10:30:00Z"))
+            duration = IcalDuration("PT1H30M")
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -200,9 +210,9 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_NoDtEnd_Duration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            duration = Duration(null, "PT1H30M")
-            rDates += RDate(DateList("20200602T113000", Value.DATE_TIME, tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            duration = IcalDuration("PT1H30M")
+            rDates += RDate(DateList.parse("20200602T113000", tzVienna!!.toZoneId()))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -219,8 +229,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_DtEnd_NoDuration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            dtEnd = DtEnd("20200602T143000", tzShanghai)
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200602T143000", tzShanghai!!.toZoneId()).temporal)
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -235,10 +245,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_DtEnd_NoDuration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzShanghai)
-            dtEnd = DtEnd("20200601T123000", tzVienna)
-            rDates += RDate(DateList("20200701T123000,20200702T123000", Value.DATE_TIME, tzVienna))
-            rDates += RDate(DateList("20200801T123000,20200802T123000", Value.DATE_TIME, tzShanghai))
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzShanghai!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            rDates += RDate(DateList.parse("20200701T123000,20200702T123000", tzVienna!!.toZoneId()))
+            rDates += RDate(DateList.parse("20200801T123000,20200802T123000", tzShanghai!!.toZoneId()))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -255,9 +265,9 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_DtEnd_Duration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            dtEnd = DtEnd("20200601T143000", tzVienna)
-            duration = Duration(null, "PT1S")
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200601T143000", tzVienna!!.toZoneId()).temporal)
+            duration = IcalDuration("PT1S")
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -272,10 +282,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_NonAllDay_DtEnd_Duration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzVienna)
-            dtEnd = DtEnd("20200601T143000", tzVienna)
-            duration = Duration(null, "PT10S")
-            rRules += RRule("FREQ=MONTHLY;COUNT=1")
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200601T143000", tzVienna!!.toZoneId()).temporal)
+            duration = IcalDuration("PT10S")
+            rRules += RRule<Temporal>("FREQ=MONTHLY;COUNT=1")
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -292,7 +302,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_NoDtEnd_NoDuration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -307,8 +317,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_NoDtEnd_NoDuration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            rRules += RRule("FREQ=MONTHLY;COUNT=3")
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            rRules += RRule<Temporal>("FREQ=MONTHLY;COUNT=3")
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -325,8 +335,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_NoDtEnd_Duration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            duration = Duration(null, "P2W1D")
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            duration = IcalDuration("P2W1D")
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -341,9 +351,9 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_NoDtEnd_Duration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            duration = Duration(null, "P2D")
-            rRules += RRule("FREQ=YEARLY;BYMONTH=4;BYDAY=-1SU")
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            duration = IcalDuration("P2D")
+            rRules += RRule<Temporal>("FREQ=YEARLY;BYMONTH=4;BYDAY=-1SU")
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -360,8 +370,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_DtEnd_NoDuration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            dtEnd = DtEnd(Date("20200701"))
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            dtEnd = DtEnd(LocalDate.parse("20200701", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -376,10 +386,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_DtEnd_NoDuration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            dtEnd = DtEnd(Date("20200701"))
-            rDates += RDate(DateList("20210601", Value.DATE))
-            rDates += RDate(DateList("20220601T120030", Value.DATE_TIME))
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            dtEnd = DtEnd(LocalDate.parse("20200701", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            rDates += RDate(DateList.parse("20210601"))
+            rDates += RDate(DateList.parse("20220601T120030"))
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -396,9 +406,9 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_DtEnd_Duration_NonRecurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            dtEnd = DtEnd(Date("20200701"))
-            duration = Duration(null, "PT5M")
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            dtEnd = DtEnd(LocalDate.parse("20200701", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            duration = IcalDuration("PT5M")
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -413,10 +423,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_AllDay_DtEnd_Duration_Recurring() {
         val values = buildEvent(false) {
-            dtStart = DtStart(Date("20200601"))
-            dtEnd = DtEnd(Date("20200701"))
-            duration = Duration(null, "PT1M")
-            rRules += RRule("FREQ=DAILY;COUNT=1")
+            dtStart = DtStart(LocalDate.parse("20200601", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            dtEnd = DtEnd(LocalDate.parse("20200701", java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+            duration = IcalDuration("PT1M")
+            rRules += RRule<Temporal>("FREQ=DAILY;COUNT=1")
         }
         assertEquals(1, values.getAsInteger(Events.ALL_DAY))
 
@@ -433,25 +443,25 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_FloatingTimes() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000")
-            dtEnd = DtEnd("20200601T123001")
+            dtStart = DtStart(LocalDateTime.parse("20200601T123000", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")))
+            dtEnd = DtEnd(LocalDateTime.parse("20200601T123001", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
-        assertEquals(DateTime("20200601T123000", tzDefault).time, values.getAsLong(Events.DTSTART))
+        assertEquals(TemporalAdapter.parse("20200601T123000", tzDefault!!.toZoneId()).temporal.toTimestamp(), values.getAsLong(Events.DTSTART))
         assertEquals(tzIdDefault, values.get(Events.EVENT_TIMEZONE))
 
-        assertEquals(DateTime("20200601T123001", tzDefault).time, values.getAsLong(Events.DTEND))
+        assertEquals(TemporalAdapter.parse("20200601T123001", tzDefault!!.toZoneId()).temporal.toTimestamp(), values.getAsLong(Events.DTEND))
         assertEquals(tzIdDefault, values.get(Events.EVENT_END_TIMEZONE))
     }
 
     @Test
     fun testBuildEvent_FloatingTimesInRecurrenceDates() {
         val values = buildEvent(false) {
-            dtStart = DtStart("20200601T123000", tzShanghai)
-            duration = Duration(null, "PT5M30S")
-            rDates += RDate(DateList("20200602T113000", Value.DATE_TIME))
-            exDates += ExDate(DateList("20200602T113000", Value.DATE_TIME))
+            dtStart = DtStart(TemporalAdapter.parse("20200601T123000", tzShanghai!!.toZoneId()).temporal)
+            duration = IcalDuration("PT5M30S")
+            rDates += RDate(DateList.parse("20200602T113000"))
+            exDates += ExDate(DateList.parse("20200602T113000"))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -461,8 +471,11 @@ class AndroidEventTest {
         assertEquals("PT5M30S", values.getAsString(Events.DURATION))
         assertNull(values.get(Events.EVENT_END_TIMEZONE))
 
-        val rewritten = DateTime("20200602T113000")
-        rewritten.timeZone = tzShanghai
+        val rewritten = TemporalAdapter(
+            LocalDateTime.parse("20200602T113000", java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))
+                .atZone(tzDefault!!.toZoneId())
+                .withZoneSameInstant(tzShanghai.toZoneId())
+        )
         assertEquals("${tzShanghai.id};20200601T123000,$rewritten", values.get(Events.RDATE))
         assertEquals("$tzIdDefault;20200602T113000", values.get(Events.EXDATE))
     }
@@ -470,8 +483,8 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_UTC() {
         val values = buildEvent(false) {
-            dtStart = DtStart(DateTime(1591014600000L), true)
-            dtEnd = DtEnd(DateTime(1591021801000L), true)
+            dtStart = DtStart(Instant.ofEpochMilli(1591014600000L))
+            dtEnd = DtEnd(Instant.ofEpochMilli(1591021801000L))
         }
         assertEquals(0, values.getAsInteger(Events.ALL_DAY))
 
@@ -552,7 +565,7 @@ class AndroidEventTest {
     fun testBuildEvent_Organizer_EmailParameter() {
         buildEvent(true) {
             organizer = Organizer("local-id:user").apply {
-                parameters.add(Email("organizer@example.com"))
+                this += Email("organizer@example.com")
             }
             attendees += Attendee("mailto:attendee@example.com")
         }.let { result ->
@@ -573,7 +586,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Status_Confirmed() {
         buildEvent(true) {
-            status = Status.VEVENT_CONFIRMED
+            status = ImmutableStatus.VEVENT_CONFIRMED
         }.let { result ->
             assertEquals(Events.STATUS_CONFIRMED, result.getAsInteger(Events.STATUS))
         }
@@ -582,7 +595,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Status_Cancelled() {
         buildEvent(true) {
-            status = Status.VEVENT_CANCELLED
+            status = ImmutableStatus.VEVENT_CANCELLED
         }.let { result ->
             assertEquals(Events.STATUS_CANCELED, result.getAsInteger(Events.STATUS))
         }
@@ -591,7 +604,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Status_Tentative() {
         buildEvent(true) {
-            status = Status.VEVENT_TENTATIVE
+            status = ImmutableStatus.VEVENT_TENTATIVE
         }.let { result ->
             assertEquals(Events.STATUS_TENTATIVE, result.getAsInteger(Events.STATUS))
         }
@@ -600,7 +613,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Status_Invalid() {
         buildEvent(true) {
-            status = Status.VTODO_IN_PROCESS
+            status = ImmutableStatus.VTODO_IN_PROCESS
         }.let { result ->
             assertEquals(Events.STATUS_TENTATIVE, result.getAsInteger(Events.STATUS))
         }
@@ -635,7 +648,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Classification_Public() {
         buildEvent(true) {
-            classification = Clazz.PUBLIC
+            classification = ImmutableClazz.PUBLIC
         }.let { result ->
             assertEquals(Events.ACCESS_PUBLIC, result.getAsInteger(Events.ACCESS_LEVEL))
             assertNull(firstUnknownProperty(result))
@@ -645,7 +658,7 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Classification_Private() {
         buildEvent(true) {
-            classification = Clazz.PRIVATE
+            classification = ImmutableClazz.PRIVATE
         }.let { result ->
             assertEquals(Events.ACCESS_PRIVATE, result.getAsInteger(Events.ACCESS_LEVEL))
             assertNull(firstUnknownProperty(result))
@@ -655,10 +668,10 @@ class AndroidEventTest {
     @Test
     fun testBuildEvent_Classification_Confidential() {
         buildEvent(true) {
-            classification = Clazz.CONFIDENTIAL
+            classification = ImmutableClazz.CONFIDENTIAL
         }.let { result ->
             assertEquals(Events.ACCESS_CONFIDENTIAL, result.getAsInteger(Events.ACCESS_LEVEL))
-            assertEquals(Clazz.CONFIDENTIAL, firstUnknownProperty(result))
+            assertEquals(ImmutableClazz.CONFIDENTIAL, firstUnknownProperty(result))
         }
     }
 
@@ -711,7 +724,7 @@ class AndroidEventTest {
     fun testBuildReminder_Trigger_Type_Audio() {
         buildEvent(true) {
             alarms += VAlarm(Duration.ofMinutes(-10)).apply {
-                properties += Action.AUDIO
+                this += ImmutableAction.AUDIO
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -725,7 +738,7 @@ class AndroidEventTest {
     fun testBuildReminder_Trigger_Type_Display() {
         buildEvent(true) {
             alarms += VAlarm(Duration.ofMinutes(-10)).apply {
-                properties += Action.DISPLAY
+                this += ImmutableAction.DISPLAY
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -739,7 +752,7 @@ class AndroidEventTest {
     fun testBuildReminder_Trigger_Type_Email() {
         buildEvent(true) {
             alarms += VAlarm(Duration.ofSeconds(-120)).apply {
-                properties += Action.EMAIL
+                this += ImmutableAction.EMAIL
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -753,7 +766,7 @@ class AndroidEventTest {
     fun testBuildReminder_Trigger_Type_Custom() {
         buildEvent(true) {
             alarms += VAlarm(Duration.ofSeconds(-120)).apply {
-                properties += Action("X-CUSTOM")
+                this += Action("X-CUSTOM")
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -800,10 +813,10 @@ class AndroidEventTest {
     @Test
     fun testBuildReminder_Trigger_RelEnd_Duration() {
         buildEvent(false) {
-            dtStart = DtStart(DateTime("20200621T120000", tzVienna))
-            dtEnd = DtEnd(DateTime("20200621T140000", tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200621T140000", tzVienna!!.toZoneId()).temporal)
             alarms += VAlarm(Period.ofDays(-1)).apply {
-                trigger.parameters.add(Related.END)
+                trigger.get() += Related.END
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -815,10 +828,10 @@ class AndroidEventTest {
     @Test
     fun testBuildReminder_Trigger_RelEnd_Duration_LessThanOneMinute() {
         buildEvent(false) {
-            dtStart = DtStart(DateTime("20200621T120000", tzVienna))
-            dtEnd = DtEnd(DateTime("20200621T140000", tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200621T140000", tzVienna!!.toZoneId()).temporal)
             alarms += VAlarm(Duration.ofSeconds(-7240)).apply {
-                trigger.parameters.add(Related.END)
+                trigger.get() += Related.END
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -831,10 +844,10 @@ class AndroidEventTest {
     fun testBuildReminder_Trigger_RelEnd_Duration_Positive() {
         // positive duration -> reminder is AFTER reference time -> negative minutes field
         buildEvent(false) {
-            dtStart = DtStart(DateTime("20200621T120000", tzVienna))
-            dtEnd = DtEnd(DateTime("20200621T140000", tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal)
+            dtEnd = DtEnd(TemporalAdapter.parse("20200621T140000", tzVienna!!.toZoneId()).temporal)
             alarms += VAlarm(Duration.ofMinutes(10)).apply {
-                trigger.parameters.add(Related.END)
+                trigger.get() += Related.END
             }
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
@@ -846,8 +859,8 @@ class AndroidEventTest {
     @Test
     fun testBuildReminder_Trigger_Absolute() {
         buildEvent(false) {
-            dtStart = DtStart(DateTime("20200621T120000", tzVienna))
-            alarms += VAlarm(DateTime("20200621T110000", tzVienna))
+            dtStart = DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal)
+            alarms += VAlarm(TemporalAdapter.parse("20200621T110000", tzVienna!!.toZoneId()).temporal.toInstant())
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
                 assertEquals(60, reminder.getAsInteger(Reminders.MINUTES))
@@ -858,8 +871,8 @@ class AndroidEventTest {
     @Test
     fun testBuildReminder_Trigger_Absolute_OtherTimeZone() {
         buildEvent(false) {
-            dtStart = DtStart(DateTime("20200621T120000", tzVienna))
-            alarms += VAlarm(DateTime("20200621T110000", tzShanghai))
+            dtStart = DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal)
+            alarms += VAlarm(TemporalAdapter.parse("20200621T110000", tzShanghai!!.toZoneId()).temporal.toInstant())
         }.let { result ->
             firstReminder(result)!!.let { reminder ->
                 assertEquals(420, reminder.getAsInteger(Reminders.MINUTES))
@@ -908,7 +921,7 @@ class AndroidEventTest {
     fun testBuildAttendee_CustomUri_EmailParam() {
         buildEvent(true) {
             attendees += Attendee("sample:uri").apply {
-                parameters.add(Email("attendee1@example.com"))
+                this += Email("attendee1@example.com")
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -923,7 +936,7 @@ class AndroidEventTest {
     fun testBuildAttendee_Cn() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(Cn("Sample Attendee"))
+                this += Cn("Sample Attendee")
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -940,9 +953,9 @@ class AndroidEventTest {
                 buildEvent(true) {
                     attendees += Attendee("mailto:attendee@example.com").apply {
                         if (cuType != null)
-                            parameters.add(cuType)
+                            this += cuType
                         if (role != null)
-                            parameters.add(role)
+                            this += role
                     }
                 }.let { result ->
                     firstAttendee(result)!!.let { attendee ->
@@ -955,8 +968,8 @@ class AndroidEventTest {
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
                     if (cuType != null)
-                        parameters.add(cuType)
-                    parameters.add(Role.OPT_PARTICIPANT)
+                        this += cuType
+                    this += Role.OPT_PARTICIPANT
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -968,8 +981,8 @@ class AndroidEventTest {
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
                     if (cuType != null)
-                        parameters.add(cuType)
-                    parameters.add(Role.NON_PARTICIPANT)
+                        this += cuType
+                    this += Role.NON_PARTICIPANT
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -986,9 +999,9 @@ class AndroidEventTest {
         for (role in arrayOf(Role.REQ_PARTICIPANT, Role("x-custom-role"), null)) {
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
-                    parameters.add(CuType.UNKNOWN)
+                    this += CuType.UNKNOWN
                     if (role != null)
-                        parameters.add(role)
+                        this += role
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -1000,8 +1013,8 @@ class AndroidEventTest {
         // OPT-PARTICIPANT
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(CuType.UNKNOWN)
-                parameters.add(Role.OPT_PARTICIPANT)
+                this += CuType.UNKNOWN
+                this += Role.OPT_PARTICIPANT
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1012,8 +1025,8 @@ class AndroidEventTest {
         // NON-PARTICIPANT
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(CuType.UNKNOWN)
-                parameters.add(Role.NON_PARTICIPANT)
+                this += CuType.UNKNOWN
+                this += Role.NON_PARTICIPANT
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1029,9 +1042,9 @@ class AndroidEventTest {
         for (role in arrayOf(Role.REQ_PARTICIPANT, Role("x-custom-role"), null)) {
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
-                    parameters.add(CuType.GROUP)
+                    this += CuType.GROUP
                     if (role != null)
-                        parameters.add(role)
+                        this += role
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -1043,8 +1056,8 @@ class AndroidEventTest {
         // OPT-PARTICIPANT
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(CuType.GROUP)
-                parameters.add(Role.OPT_PARTICIPANT)
+                this += CuType.GROUP
+                this += Role.OPT_PARTICIPANT
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1055,8 +1068,8 @@ class AndroidEventTest {
         // NON-PARTICIPANT
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(CuType.GROUP)
-                parameters.add(Role.NON_PARTICIPANT)
+                this += CuType.GROUP
+                this += Role.NON_PARTICIPANT
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1071,9 +1084,9 @@ class AndroidEventTest {
         for (role in arrayOf(null, Role.REQ_PARTICIPANT, Role.OPT_PARTICIPANT, Role.NON_PARTICIPANT, Role("X-CUSTOM-ROLE")))
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
-                    parameters.add(CuType.RESOURCE)
+                    this += CuType.RESOURCE
                     if (role != null)
-                        parameters.add(role)
+                        this += role
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -1084,8 +1097,8 @@ class AndroidEventTest {
         // CHAIR
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(CuType.RESOURCE)
-                parameters.add(Role.CHAIR)
+                this += CuType.RESOURCE
+                this += Role.CHAIR
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1101,8 +1114,8 @@ class AndroidEventTest {
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
                     if (cuType != null)
-                        parameters.add(cuType)
-                    parameters.add(Role.CHAIR)
+                        this += cuType
+                    this += Role.CHAIR
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -1117,9 +1130,9 @@ class AndroidEventTest {
         for (role in arrayOf(null, Role.CHAIR, Role.REQ_PARTICIPANT, Role.OPT_PARTICIPANT, Role.NON_PARTICIPANT, Role("X-CUSTOM-ROLE")))
             buildEvent(true) {
                 attendees += Attendee("mailto:attendee@example.com").apply {
-                    parameters.add(CuType.ROOM)
+                    this += CuType.ROOM
                     if (role != null)
-                        parameters.add(role)
+                        this += role
                 }
             }.let { result ->
                 firstAttendee(result)!!.let { attendee ->
@@ -1157,7 +1170,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_NeedsAction() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat.NEEDS_ACTION)
+                this += PartStat.NEEDS_ACTION
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1170,7 +1183,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_Accepted() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat.ACCEPTED)
+                this += PartStat.ACCEPTED
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1183,7 +1196,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_Declined() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat.DECLINED)
+                this += PartStat.DECLINED
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1196,7 +1209,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_Tentative() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat.TENTATIVE)
+                this += PartStat.TENTATIVE
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1209,7 +1222,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_Delegated() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat.DELEGATED)
+                this += PartStat.DELEGATED
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1222,7 +1235,7 @@ class AndroidEventTest {
     fun testBuildAttendee_PartStat_Custom() {
         buildEvent(true) {
             attendees += Attendee("mailto:attendee@example.com").apply {
-                parameters.add(PartStat("X-WILL-ASK"))
+                this += PartStat("X-WILL-ASK")
             }
         }.let { result ->
             firstAttendee(result)!!.let { attendee ->
@@ -1235,13 +1248,12 @@ class AndroidEventTest {
     @Test
     fun testBuildUnknownProperty() {
         buildEvent(true) {
-            val params = ParameterList()
-            params.add(Language("en"))
+            val params = ParameterList(listOf(Language("en")))
             unknownProperties += XProperty("X-NAME", params, "Custom Value")
         }.let { result ->
             firstUnknownProperty(result)!!.let { property ->
                 assertEquals("X-NAME", property.name)
-                assertEquals("en", property.getParameter<Language>(Parameter.LANGUAGE).value)
+                assertEquals("en", property.getParameter<Language>(Parameter.LANGUAGE).get().value)
                 assertEquals("Custom Value", property.value)
             }
         }
@@ -1263,11 +1275,11 @@ class AndroidEventTest {
     @Test
     fun testBuildException_NonAllDay() {
         buildEvent(false) {
-            dtStart = DtStart("20200706T193000", tzVienna)
-            rRules += RRule("FREQ=DAILY;COUNT=10")
+            dtStart = DtStart(TemporalAdapter.parse("20200706T193000", tzVienna!!.toZoneId()).temporal)
+            rRules += RRule<Temporal>("FREQ=DAILY;COUNT=10")
             exceptions += Event().apply {
-                recurrenceId = RecurrenceId("20200707T193000", tzVienna)
-                dtStart = DtStart("20200706T203000", tzShanghai)
+                recurrenceId = RecurrenceId(TemporalAdapter.parse("20200707T193000", tzVienna!!.toZoneId()).temporal)
+                dtStart = DtStart(TemporalAdapter.parse("20200706T203000", tzShanghai!!.toZoneId()).temporal)
                 summary = "Event moved to one hour later"
             }
         }.let { result ->
@@ -1289,11 +1301,11 @@ class AndroidEventTest {
     @Test
     fun testBuildException_NonAllDay_RecurrenceIdAllDay() {
         buildEvent(false) {
-            dtStart = DtStart("20200706T193000", tzVienna)
-            rRules += RRule("FREQ=DAILY;COUNT=10")
+            dtStart = DtStart(TemporalAdapter.parse("20200706T193000", tzVienna!!.toZoneId()).temporal)
+            rRules += RRule<Temporal>("FREQ=DAILY;COUNT=10")
             exceptions += Event().apply {
-                recurrenceId = RecurrenceId(Date("20200707"))   // illegal! should be rewritten to DateTime("20200707T193000", tzVienna)
-                dtStart = DtStart("20200706T203000", tzShanghai)
+                recurrenceId = RecurrenceId(LocalDate.of(2020, 7, 7))   // illegal! should be rewritten to 20200707T193000 in Europe/Vienna
+                dtStart = DtStart(TemporalAdapter.parse("20200706T203000", tzShanghai!!.toZoneId()).temporal)
                 summary = "Event moved to one hour later"
             }
         }.let { result ->
@@ -1315,11 +1327,11 @@ class AndroidEventTest {
     @Test
     fun testBuildException_AllDay() {
         buildEvent(false) {
-            dtStart = DtStart(Date("20200706"))
-            rRules += RRule("FREQ=WEEKLY;COUNT=3")
+            dtStart = DtStart(LocalDate.of(2020, 7, 6))
+            rRules += RRule<Temporal>("FREQ=WEEKLY;COUNT=3")
             exceptions += Event().apply {
-                recurrenceId = RecurrenceId(Date("20200707"))
-                dtStart = DtStart("20200706T123000", tzVienna)
+                recurrenceId = RecurrenceId(LocalDate.of(2020, 7, 7))
+                dtStart = DtStart(TemporalAdapter.parse("20200706T123000", tzVienna!!.toZoneId()).temporal)
                 summary = "Today not an all-day event"
             }
         }.let { result ->
@@ -1340,11 +1352,11 @@ class AndroidEventTest {
     @Test
     fun testBuildException_AllDay_RecurrenceIdNonAllDay() {
         buildEvent(false) {
-            dtStart = DtStart(Date("20200706"))
-            rRules += RRule("FREQ=WEEKLY;COUNT=3")
+            dtStart = DtStart(LocalDate.of(2020, 7, 6))
+            rRules += RRule<Temporal>("FREQ=WEEKLY;COUNT=3")
             exceptions += Event().apply {
-                recurrenceId = RecurrenceId("20200707T000000", tzVienna)     // illegal! should be rewritten to Date("20200707")
-                dtStart = DtStart("20200706T123000", tzVienna)
+                recurrenceId = RecurrenceId(TemporalAdapter.parse("20200707T000000", tzVienna!!.toZoneId()).temporal)     // illegal! should be rewritten to LocalDate.of(2020, 7, 7)
+                dtStart = DtStart(TemporalAdapter.parse("20200706T123000", tzVienna!!.toZoneId()).temporal)
                 summary = "Today not an all-day event"
             }
         }.let { result ->
@@ -1400,8 +1412,8 @@ class AndroidEventTest {
             put(Events.DTEND, 1592742600000L)    // 21/06/2020 14:30 +0200
             put(Events.EVENT_END_TIMEZONE, "Europe/Vienna")
         }.let { result ->
-            assertEquals(DtStart(DateTime("20200621T120000", tzVienna)), result.dtStart)
-            assertEquals(DtEnd(DateTime("20200621T143000", tzVienna)), result.dtEnd)
+            assertEquals(DtStart(TemporalAdapter.parse("20200621T120000", tzVienna!!.toZoneId()).temporal), result.dtStart)
+            assertEquals(DtEnd(TemporalAdapter.parse("20200621T143000", tzVienna!!.toZoneId()).temporal), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1414,8 +1426,8 @@ class AndroidEventTest {
             put(Events.DTEND, 1592742600000L)    // 21/06/2020 14:30 +0200
             put(Events.EVENT_END_TIMEZONE, "Europe/Vienna")
         }.let { result ->
-            assertEquals(DtStart(DateTime("20200621T180000", tzShanghai)), result.dtStart)
-            assertEquals(DtEnd(DateTime("20200621T143000", tzVienna)), result.dtEnd)
+            assertEquals(DtStart(TemporalAdapter.parse("20200621T180000", tzShanghai!!.toZoneId()).temporal), result.dtStart)
+            assertEquals(DtEnd(TemporalAdapter.parse("20200621T143000", tzVienna!!.toZoneId()).temporal), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1429,8 +1441,8 @@ class AndroidEventTest {
             put(Events.EVENT_TIMEZONE, "Asia/Shanghai")
             put(Events.DURATION, "PT1H")
         }.let { result ->
-            assertEquals(DtStart(DateTime("20200621T180000", tzShanghai)), result.dtStart)
-            assertEquals(DtEnd(DateTime("20200621T190000", tzShanghai)), result.dtEnd)
+            assertEquals(DtStart(TemporalAdapter.parse("20200621T180000", tzShanghai!!.toZoneId()).temporal), result.dtStart)
+            assertEquals(DtEnd(TemporalAdapter.parse("20200621T190000", tzShanghai!!.toZoneId()).temporal), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1443,7 +1455,7 @@ class AndroidEventTest {
             put(Events.DTEND, 1592742600000L)    // 21/06/2020 14:30 +0200
             put(Events.EVENT_END_TIMEZONE, "Europe/Vienna")
         }.let { result ->
-            assertEquals(DtStart(DateTime("20200621T143000", tzVienna)), result.dtStart)
+            assertEquals(DtStart(TemporalAdapter.parse("20200621T143000", tzVienna!!.toZoneId()).temporal), result.dtStart)
             assertNull(result.dtEnd)
             assertNull(result.duration)
         }
@@ -1458,7 +1470,7 @@ class AndroidEventTest {
             put(Events.DTEND, 1592697600000L)    // 21/06/2020
             put(Events.EVENT_END_TIMEZONE, AndroidTimeUtils.TZID_ALLDAY)
         }.let { result ->
-            assertEquals(DtStart(Date("20200621")), result.dtStart)
+            assertEquals(DtStart(LocalDate.of(2020, 6, 21)), result.dtStart)
             assertNull(result.dtEnd)
             assertNull(result.duration)
         }
@@ -1473,8 +1485,8 @@ class AndroidEventTest {
             put(Events.DTEND, 1592784000000L)    // 22/06/2020
             put(Events.EVENT_END_TIMEZONE, AndroidTimeUtils.TZID_ALLDAY)
         }.let { result ->
-            assertEquals(DtStart(Date("20200621")), result.dtStart)
-            assertEquals(DtEnd(Date("20200622")), result.dtEnd)
+            assertEquals(DtStart(LocalDate.of(2020, 6, 21)), result.dtStart)
+            assertEquals(DtEnd(LocalDate.of(2020, 6, 22)), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1489,8 +1501,8 @@ class AndroidEventTest {
             put(Events.EVENT_TIMEZONE, AndroidTimeUtils.TZID_ALLDAY)
             put(Events.DURATION, "P1W")
         }.let { result ->
-            assertEquals(DtStart(Date("20200621")), result.dtStart)
-            assertEquals(DtEnd(Date("20200628")), result.dtEnd)
+            assertEquals(DtStart(LocalDate.of(2020, 6, 21)), result.dtStart)
+            assertEquals(DtEnd(LocalDate.of(2020, 6, 28)), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1505,7 +1517,7 @@ class AndroidEventTest {
             put(Events.EVENT_TIMEZONE, AndroidTimeUtils.TZID_ALLDAY)
             put(Events.DURATION, "PT1H30M")
         }.let { result ->
-            assertEquals(DtStart(Date("20200621")), result.dtStart)
+            assertEquals(DtStart(LocalDate.of(2020, 6, 21)), result.dtStart)
             assertNull(result.dtEnd)
             assertNull(result.duration)
         }
@@ -1520,8 +1532,8 @@ class AndroidEventTest {
             put(Events.EVENT_TIMEZONE, AndroidTimeUtils.TZID_ALLDAY)
             put(Events.DURATION, "PT49H2M")
         }.let { result ->
-            assertEquals(DtStart(Date("20200621")), result.dtStart)
-            assertEquals(DtEnd(Date("20200623")), result.dtEnd)
+            assertEquals(DtStart(LocalDate.of(2020, 6, 21)), result.dtStart)
+            assertEquals(DtEnd(LocalDate.of(2020, 6, 23)), result.dtEnd)
             assertNull(result.duration)
         }
     }
@@ -1568,7 +1580,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.STATUS, Events.STATUS_CONFIRMED)
         }.let { result ->
-            assertEquals(Status.VEVENT_CONFIRMED, result.status)
+            assertEquals(ImmutableStatus.VEVENT_CONFIRMED, result.status)
         }
     }
 
@@ -1577,7 +1589,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.STATUS, Events.STATUS_TENTATIVE)
         }.let { result ->
-            assertEquals(Status.VEVENT_TENTATIVE, result.status)
+            assertEquals(ImmutableStatus.VEVENT_TENTATIVE, result.status)
         }
     }
 
@@ -1586,7 +1598,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.STATUS, Events.STATUS_CANCELED)
         }.let { result ->
-            assertEquals(Status.VEVENT_CANCELLED, result.status)
+            assertEquals(ImmutableStatus.VEVENT_CANCELLED, result.status)
         }
     }
 
@@ -1662,7 +1674,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.ACCESS_LEVEL, Events.ACCESS_PUBLIC)
         }.let { result ->
-            assertEquals(Clazz.PUBLIC, result.classification)
+            assertEquals(ImmutableClazz.PUBLIC, result.classification)
         }
     }
 
@@ -1671,7 +1683,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.ACCESS_LEVEL, Events.ACCESS_PRIVATE)
         }.let { result ->
-            assertEquals(Clazz.PRIVATE, result.classification)
+            assertEquals(ImmutableClazz.PRIVATE, result.classification)
         }
     }
 
@@ -1680,7 +1692,7 @@ class AndroidEventTest {
         populateEvent(true) {
             put(Events.ACCESS_LEVEL, Events.ACCESS_CONFIDENTIAL)
         }.let { result ->
-            assertEquals(Clazz.CONFIDENTIAL, result.classification)
+            assertEquals(ImmutableClazz.CONFIDENTIAL, result.classification)
         }
     }
 
@@ -1692,10 +1704,10 @@ class AndroidEventTest {
             provider.insert(calendar.syncAdapterURI(ExtendedProperties.CONTENT_URI), ContentValues().apply {
                 put(ExtendedProperties.EVENT_ID, id)
                 put(ExtendedProperties.NAME, UnknownProperty.CONTENT_ITEM_TYPE)
-                put(ExtendedProperties.VALUE, UnknownProperty.toJsonString(Clazz.CONFIDENTIAL))
+                put(ExtendedProperties.VALUE, UnknownProperty.toJsonString(ImmutableClazz.CONFIDENTIAL))
             })
         }).let { result ->
-            assertEquals(Clazz.CONFIDENTIAL, result.classification)
+            assertEquals(ImmutableClazz.CONFIDENTIAL, result.classification)
         }
     }
 
@@ -1753,7 +1765,7 @@ class AndroidEventTest {
             put(Reminders.METHOD, Reminders.METHOD_EMAIL)
             put(Reminders.MINUTES, 10)
         }!!.let { alarm ->
-            assertEquals(Action.EMAIL, alarm.action)
+            assertEquals(ImmutableAction.EMAIL, alarm.action.get())
             assertNotNull(alarm.summary)
             assertNotNull(alarm.description)
         }
@@ -1768,7 +1780,7 @@ class AndroidEventTest {
             populateReminder(testCalendar) {
                 put(Reminders.METHOD, Reminders.METHOD_EMAIL)
             }!!.let { alarm ->
-                assertEquals(Action.DISPLAY, alarm.action)
+                assertEquals(ImmutableAction.DISPLAY, alarm.action.get())
                 assertNotNull(alarm.description)
             }
         } finally {
@@ -1783,7 +1795,7 @@ class AndroidEventTest {
                 put(Reminders.METHOD, type)
                 put(Reminders.MINUTES, 10)
             }!!.let { alarm ->
-                assertEquals(Action.DISPLAY, alarm.action)
+                assertEquals(ImmutableAction.DISPLAY, alarm.action.get())
                 assertNotNull(alarm.description)
             }
     }
@@ -1794,7 +1806,7 @@ class AndroidEventTest {
             put(Reminders.METHOD, Reminders.METHOD_ALERT)
             put(Reminders.MINUTES, 10)
         }!!.let { alarm ->
-            assertEquals(Duration.ofMinutes(-10), alarm.trigger.duration)
+            assertEquals(Duration.ofMinutes(-10), alarm.trigger.get().duration)
         }
     }
 
@@ -1804,7 +1816,7 @@ class AndroidEventTest {
             put(Reminders.METHOD, Reminders.METHOD_ALERT)
             put(Reminders.MINUTES, -10)
         }!!.let { alarm ->
-            assertEquals(Duration.ofMinutes(10), alarm.trigger.duration)
+            assertEquals(Duration.ofMinutes(10), alarm.trigger.get().duration)
         }
     }
 
@@ -1848,7 +1860,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_IDENTITY, "//example.com/principals/attendee")
         }!!.let { attendee ->
             assertEquals(URI("https://example.com/principals/attendee"), attendee.calAddress)
-            assertEquals("attendee@example.com", attendee.getParameter<Email>(Parameter.EMAIL).value)
+            assertEquals("attendee@example.com", attendee.getParameter<Email>(Parameter.EMAIL).get().value)
         }
     }
 
@@ -1862,7 +1874,7 @@ class AndroidEventTest {
                     if (type != null)
                         put(Attendees.ATTENDEE_TYPE, type as Int?)
                 }!!.let { attendee ->
-                    assertNull(attendee.getParameter(Parameter.CUTYPE))
+                    assertNull(attendee.getParameter<CuType>(Parameter.CUTYPE).orElse(null))
                 }
     }
 
@@ -1875,7 +1887,7 @@ class AndroidEventTest {
                 if (type != null)
                     put(Attendees.ATTENDEE_TYPE, type as Int?)
             }!!.let { attendee ->
-                assertEquals(CuType.GROUP, attendee.getParameter<CuType>(Parameter.CUTYPE))
+                assertEquals(CuType.GROUP, attendee.getParameter<CuType>(Parameter.CUTYPE).get())
             }
     }
 
@@ -1888,8 +1900,8 @@ class AndroidEventTest {
                 if (type != null)
                     put(Attendees.ATTENDEE_TYPE, type as Int?)
             }!!.let { attendee ->
-                assertNull(attendee.getParameter(Parameter.CUTYPE))
-                assertEquals(Role.CHAIR, attendee.getParameter<Role>(Parameter.ROLE))
+                assertNull(attendee.getParameter<CuType>(Parameter.CUTYPE).orElse(null))
+                assertEquals(Role.CHAIR, attendee.getParameter<Role>(Parameter.ROLE).get())
             }
         // TYPE_RESOURCE
         populateAttendee {
@@ -1897,8 +1909,8 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_RELATIONSHIP, Attendees.RELATIONSHIP_SPEAKER)
             put(Attendees.ATTENDEE_TYPE, Attendees.TYPE_RESOURCE)
         }!!.let { attendee ->
-            assertEquals(CuType.RESOURCE, attendee.getParameter<CuType>(Parameter.CUTYPE))
-            assertEquals(Role.CHAIR, attendee.getParameter<Role>(Parameter.ROLE))
+            assertEquals(CuType.RESOURCE, attendee.getParameter<CuType>(Parameter.CUTYPE).get())
+            assertEquals(Role.CHAIR, attendee.getParameter<Role>(Parameter.ROLE).get())
         }
     }
 
@@ -1912,7 +1924,7 @@ class AndroidEventTest {
                     if (type != null)
                         put(Attendees.ATTENDEE_TYPE, type as Int?)
                 }!!.let { attendee ->
-                    assertEquals(CuType.UNKNOWN, attendee.getParameter<CuType>(Parameter.CUTYPE))
+                    assertEquals(CuType.UNKNOWN, attendee.getParameter<CuType>(Parameter.CUTYPE).get())
                 }
     }
 
@@ -1925,7 +1937,7 @@ class AndroidEventTest {
                 if (relationship != null)
                     put(Attendees.ATTENDEE_RELATIONSHIP, relationship)
             }!!.let { attendee ->
-                assertNull(attendee.getParameter<Role>(Parameter.ROLE))
+                assertNull(attendee.getParameter<Role>(Parameter.ROLE).orElse(null))
             }
     }
 
@@ -1938,7 +1950,7 @@ class AndroidEventTest {
                 if (relationship != null)
                     put(Attendees.ATTENDEE_RELATIONSHIP, relationship)
             }!!.let { attendee ->
-                assertNull(attendee.getParameter(Parameter.ROLE))
+                assertNull(attendee.getParameter<Role>(Parameter.ROLE).orElse(null))
             }
     }
 
@@ -1951,7 +1963,7 @@ class AndroidEventTest {
                 if (relationship != null)
                     put(Attendees.ATTENDEE_RELATIONSHIP, relationship)
             }!!.let { attendee ->
-                assertEquals(Role.OPT_PARTICIPANT, attendee.getParameter<Role>(Parameter.ROLE))
+                assertEquals(Role.OPT_PARTICIPANT, attendee.getParameter<Role>(Parameter.ROLE).get())
             }
     }
 
@@ -1964,7 +1976,7 @@ class AndroidEventTest {
                 if (relationship != null)
                     put(Attendees.ATTENDEE_RELATIONSHIP, relationship)
             }!!.let { attendee ->
-                assertEquals(CuType.RESOURCE, attendee.getParameter<CuType>(Parameter.CUTYPE))
+                assertEquals(CuType.RESOURCE, attendee.getParameter<CuType>(Parameter.CUTYPE).get())
             }
         // RELATIONSHIP_PERFORMER
         populateAttendee {
@@ -1972,7 +1984,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_TYPE, Attendees.TYPE_RESOURCE)
             put(Attendees.ATTENDEE_RELATIONSHIP, Attendees.RELATIONSHIP_PERFORMER)
         }!!.let { attendee ->
-            assertEquals(CuType.ROOM, attendee.getParameter<CuType>(Parameter.CUTYPE))
+            assertEquals(CuType.ROOM, attendee.getParameter<CuType>(Parameter.CUTYPE).get())
         }
     }
 
@@ -1981,7 +1993,7 @@ class AndroidEventTest {
         populateAttendee {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
         }!!.let { attendee ->
-            assertNull(attendee.getParameter(Parameter.PARTSTAT))
+            assertNull(attendee.getParameter<PartStat>(Parameter.PARTSTAT).orElse(null))
         }
     }
 
@@ -1991,7 +2003,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
             put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_INVITED)
         }!!.let { attendee ->
-            assertEquals(PartStat.NEEDS_ACTION, attendee.getParameter(Parameter.PARTSTAT))
+            assertEquals(PartStat.NEEDS_ACTION, attendee.getParameter<PartStat>(Parameter.PARTSTAT).get())
         }
     }
 
@@ -2001,7 +2013,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
             put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_ACCEPTED)
         }!!.let { attendee ->
-            assertEquals(PartStat.ACCEPTED, attendee.getParameter(Parameter.PARTSTAT))
+            assertEquals(PartStat.ACCEPTED, attendee.getParameter<PartStat>(Parameter.PARTSTAT).get())
         }
     }
 
@@ -2011,7 +2023,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
             put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_DECLINED)
         }!!.let { attendee ->
-            assertEquals(PartStat.DECLINED, attendee.getParameter(Parameter.PARTSTAT))
+            assertEquals(PartStat.DECLINED, attendee.getParameter<PartStat>(Parameter.PARTSTAT).get())
         }
     }
 
@@ -2021,7 +2033,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
             put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_TENTATIVE)
         }!!.let { attendee ->
-            assertEquals(PartStat.TENTATIVE, attendee.getParameter(Parameter.PARTSTAT))
+            assertEquals(PartStat.TENTATIVE, attendee.getParameter<PartStat>(Parameter.PARTSTAT).get())
         }
     }
 
@@ -2031,7 +2043,7 @@ class AndroidEventTest {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
             put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE)
         }!!.let { attendee ->
-            assertNull(attendee.getParameter(Parameter.PARTSTAT))
+            assertNull(attendee.getParameter<PartStat>(Parameter.PARTSTAT).orElse(null))
         }
     }
 
@@ -2040,14 +2052,13 @@ class AndroidEventTest {
         populateAttendee {
             put(Attendees.ATTENDEE_EMAIL, "attendee@example.com")
         }!!.let { attendee ->
-            assertTrue(attendee.getParameter<Rsvp>(Parameter.RSVP).rsvp)
+            assertTrue(attendee.getParameter<Rsvp>(Parameter.RSVP).get().rsvp)
         }
     }
 
     @Test
     fun testPopulateUnknownProperty() {
-        val params = ParameterList()
-        params.add(Language("en"))
+        val params = ParameterList(listOf(Language("en")))
         val unknownProperty = XProperty("X-NAME", params, "Custom Value")
         val result = populateEvent(true, valuesBuilder = {}, insertCallback = { id ->
             val values = ContentValues()
@@ -2057,7 +2068,7 @@ class AndroidEventTest {
             provider.insert(calendar.syncAdapterURI(ExtendedProperties.CONTENT_URI), values)
         }).unknownProperties.first
         assertEquals("X-NAME", result.name)
-        assertEquals("en", result.getParameter<Language>(Parameter.LANGUAGE).value)
+        assertEquals("en", result.getParameter<Language>(Parameter.LANGUAGE).get().value)
         assertEquals("Custom Value", result.value)
     }
 
@@ -2089,11 +2100,11 @@ class AndroidEventTest {
             put(Events.TITLE, "Event moved to one hour later")
         }).let { event ->
             assertEquals("Recurring non-all-day event with exception", event.summary)
-            assertEquals(DtStart("20200706T193000", tzVienna), event.dtStart)
+            assertEquals(DtStart(TemporalAdapter.parse("20200706T193000", tzVienna!!.toZoneId()).temporal), event.dtStart)
             assertEquals("FREQ=DAILY;COUNT=10", event.rRules.first.value)
             val exception = event.exceptions.first!!
-            assertEquals(RecurrenceId("20200708T013000", tzShanghai), exception.recurrenceId)
-            assertEquals(DtStart("20200706T203000", tzShanghai), exception.dtStart)
+            assertEquals(RecurrenceId(TemporalAdapter.parse("20200708T013000", tzShanghai!!.toZoneId()).temporal), exception.recurrenceId)
+            assertEquals(DtStart(TemporalAdapter.parse("20200706T203000", tzShanghai!!.toZoneId()).temporal), exception.dtStart)
             assertEquals("Event moved to one hour later", exception.summary)
         }
     }
@@ -2117,11 +2128,11 @@ class AndroidEventTest {
             put(Events.TITLE, "Today not an all-day event")
         }).let { event ->
             assertEquals("Recurring all-day event with exception", event.summary)
-            assertEquals(DtStart(Date("20200706")), event.dtStart)
+            assertEquals(DtStart(LocalDate.of(2020, 7, 6)), event.dtStart)
             assertEquals("FREQ=WEEKLY;COUNT=3", event.rRules.first.value)
             val exception = event.exceptions.first!!
-            assertEquals(RecurrenceId(Date("20200707")), exception.recurrenceId)
-            assertEquals(DtStart("20200706T183000", tzShanghai), exception.dtStart)
+            assertEquals(RecurrenceId(LocalDate.of(2020, 7, 7)), exception.recurrenceId)
+            assertEquals(DtStart(TemporalAdapter.parse("20200706T183000", tzShanghai!!.toZoneId()).temporal), exception.dtStart)
             assertEquals("Today not an all-day event", exception.summary)
         }
     }
@@ -2145,9 +2156,9 @@ class AndroidEventTest {
             put(Events.STATUS, Events.STATUS_CANCELED)
         }).let { event ->
             assertEquals("Recurring all-day event with cancelled exception", event.summary)
-            assertEquals(DtStart("20200706T193000", tzVienna), event.dtStart)
+            assertEquals(DtStart(TemporalAdapter.parse("20200706T193000", tzVienna!!.toZoneId()).temporal), event.dtStart)
             assertEquals("FREQ=DAILY;COUNT=10", event.rRules.first.value)
-            assertEquals(DateTime("20200708T013000", tzShanghai), event.exDates.first.dates.first())
+            assertEquals(TemporalAdapter.parse("20200708T013000", tzShanghai!!.toZoneId()).temporal, event.exDates.first.dates.first())
             assertTrue(event.exceptions.isEmpty())
         }
     }
@@ -2160,8 +2171,8 @@ class AndroidEventTest {
         val event = Event()
         event.uid = "sample1@testAddEvent"
         event.summary = "Sample event"
-        event.dtStart = DtStart("20150502T120000Z")
-        event.dtEnd = DtEnd("20150502T130000Z")
+        event.dtStart = DtStart<Temporal>("20150502T120000Z")
+        event.dtEnd = DtEnd<Temporal>("20150502T130000Z")
         event.organizer = Organizer(URI("mailto:organizer@example.com"))
         val uri = TestEvent(calendar, event).add()
 
@@ -2194,15 +2205,15 @@ class AndroidEventTest {
         val event = Event()
         event.uid = "sample1@testAddEvent"
         event.summary = "Sample event with STATUS"
-        event.dtStart = DtStart("20150502T120000Z")
-        event.dtEnd = DtEnd("20150502T130000Z")
+        event.dtStart = DtStart<Temporal>("20150502T120000Z")
+        event.dtEnd = DtEnd<Temporal>("20150502T130000Z")
         val uri = TestEvent(calendar, event).add()
 
         // update test event in calendar
         val testEvent = calendar.findById(ContentUris.parseId(uri))
         val event2 = testEvent.event!!
         event2.summary = "Sample event without STATUS"
-        event2.status = Status.VEVENT_CONFIRMED
+        event2.status = ImmutableStatus.VEVENT_CONFIRMED
         val uri2 = testEvent.update(event2)
 
         // event should have been updated
@@ -2212,7 +2223,7 @@ class AndroidEventTest {
         val updatedEvent = calendar.findById(ContentUris.parseId(uri2))
         try {
             val event3 = updatedEvent.event!!
-            assertEquals(Status.VEVENT_CONFIRMED, event3.status)
+            assertEquals(ImmutableStatus.VEVENT_CONFIRMED, event3.status)
         } finally {
             updatedEvent.delete()
         }
@@ -2223,9 +2234,9 @@ class AndroidEventTest {
         val event = Event()
         event.uid = "sample1@testAddEvent"
         event.summary = "Sample event with STATUS"
-        event.dtStart = DtStart("20150502T120000Z")
-        event.dtEnd = DtEnd("20150502T130000Z")
-        event.status = Status.VEVENT_CONFIRMED
+        event.dtStart = DtStart<Temporal>("20150502T120000Z")
+        event.dtEnd = DtEnd<Temporal>("20150502T130000Z")
+        event.status = ImmutableStatus.VEVENT_CONFIRMED
         val uri = TestEvent(calendar, event).add()
 
         // update test event in calendar
@@ -2256,8 +2267,8 @@ class AndroidEventTest {
         val event = Event()
         event.uid = "sample1@testLargeTransaction"
         event.summary = "Large event"
-        event.dtStart = DtStart("20150502T120000Z")
-        event.dtEnd = DtEnd("20150502T130000Z")
+        event.dtStart = DtStart<Temporal>("20150502T120000Z")
+        event.dtEnd = DtEnd<Temporal>("20150502T130000Z")
         for (i in 0 until 4000)
             event.attendees += Attendee(URI("mailto:att$i@example.com"))
         val uri = TestEvent(calendar, event).add()
@@ -2274,8 +2285,8 @@ class AndroidEventTest {
     fun testLargeTransactionSingleRow() {
         val event = Event()
         event.uid = "sample1@testLargeTransaction"
-        event.dtStart = DtStart("20150502T120000Z")
-        event.dtEnd = DtEnd("20150502T130000Z")
+        event.dtStart = DtStart<Temporal>("20150502T120000Z")
+        event.dtEnd = DtEnd<Temporal>("20150502T130000Z")
 
         // 1 MB SUMMARY ... have fun
         val data = CharArray(1024*1024)

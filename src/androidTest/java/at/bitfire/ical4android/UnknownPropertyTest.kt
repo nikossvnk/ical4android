@@ -29,9 +29,9 @@ class UnknownPropertyTest {
         assertTrue(prop is Attendee)
         assertEquals("ATTENDEE", prop.name)
         assertEquals("PropValue", prop.value)
-        assertEquals(2, prop.parameters.size())
-        assertEquals("value1", prop.parameters.getParameter<Parameter>("x-param1").value)
-        assertEquals("value2", prop.parameters.getParameter<Parameter>("x-param2").value)
+        assertEquals(2, prop.getParameters().size)
+        assertEquals("value1", prop.getParameter<Parameter>("x-param1").get().value)
+        assertEquals("value2", prop.getParameter<Parameter>("x-param2").get().value)
     }
 
     @Test(expected = JSONException::class)
@@ -50,8 +50,8 @@ class UnknownPropertyTest {
                 attendee.toString().trim()
         )
 
-        attendee.parameters.add(Rsvp(true))
-        attendee.parameters.add(XParameter("X-My-Param", "SomeValue"))
+        attendee += Rsvp(true)
+        attendee += XParameter("X-My-Param", "SomeValue")
         assertEquals(
                 "ATTENDEE;RSVP=TRUE;X-My-Param=SomeValue:mailto:test@test.at",
                 attendee.toString().trim()

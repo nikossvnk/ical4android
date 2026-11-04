@@ -22,7 +22,7 @@ class Ical4jTest {
                 "ATTENDEE;EMAIL=attendee1@example.com:sample:attendee1\n" +
                 "END:VEVENT\n" +
                 "END:VCALENDAR")).first()
-        assertEquals("attendee1@example.com", e.attendees.first.getParameter<Email>(Parameter.EMAIL).value)
+        assertEquals("attendee1@example.com", e.attendees.first.getParameter<Email>(Parameter.EMAIL).get().value)
     }
 
     @Test

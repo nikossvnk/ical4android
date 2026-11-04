@@ -10,20 +10,52 @@ package at.bitfire.ical4android
 
 import at.bitfire.ical4android.DateUtils.isDateTime
 import at.bitfire.ical4android.ICalendar.Companion.CALENDAR_NAME
+import at.bitfire.ical4android.util.AndroidTimeUtils
+import at.bitfire.ical4android.util.TimeApiExtensions.toInstant
 import net.fortuna.ical4j.data.CalendarOutputter
 import net.fortuna.ical4j.data.ParserException
-import net.fortuna.ical4j.model.*
 import net.fortuna.ical4j.model.Calendar
-import net.fortuna.ical4j.model.TimeZone
+import net.fortuna.ical4j.model.Component
+import net.fortuna.ical4j.model.ParameterList
+import net.fortuna.ical4j.model.Property
+import net.fortuna.ical4j.model.TextList
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.component.VEvent
-import net.fortuna.ical4j.model.parameter.Value
-import net.fortuna.ical4j.model.property.*
-import net.fortuna.ical4j.util.Dates
+import net.fortuna.ical4j.model.property.Attendee
+import net.fortuna.ical4j.model.property.Categories
+import net.fortuna.ical4j.model.property.Clazz
+import net.fortuna.ical4j.model.property.Color
+import net.fortuna.ical4j.model.property.Description
+import net.fortuna.ical4j.model.property.DtEnd
+import net.fortuna.ical4j.model.property.DtStamp
+import net.fortuna.ical4j.model.property.DtStart
+import net.fortuna.ical4j.model.property.Duration
+import net.fortuna.ical4j.model.property.ExDate
+import net.fortuna.ical4j.model.property.ExRule
+import net.fortuna.ical4j.model.property.LastModified
+import net.fortuna.ical4j.model.property.Location
+import net.fortuna.ical4j.model.property.Organizer
+import net.fortuna.ical4j.model.property.ProdId
+import net.fortuna.ical4j.model.property.RDate
+import net.fortuna.ical4j.model.property.RRule
+import net.fortuna.ical4j.model.property.RecurrenceId
+import net.fortuna.ical4j.model.property.Sequence
+import net.fortuna.ical4j.model.property.Status
+import net.fortuna.ical4j.model.property.Summary
+import net.fortuna.ical4j.model.property.Transp
+import net.fortuna.ical4j.model.property.Uid
+import net.fortuna.ical4j.model.property.immutable.ImmutableTransp
+import net.fortuna.ical4j.model.property.immutable.ImmutableVersion
 import java.io.IOException
 import java.io.OutputStream
 import java.io.Reader
-import java.util.*
+import java.time.LocalDate
+import java.time.Period
+import java.time.temporal.Temporal
+import java.time.temporal.TemporalAmount
+import java.util.LinkedList
+import java.util.UUID
+import kotlin.jvm.optionals.getOrNull
 
 
 class Event: ICalendar() {
@@ -32,21 +64,21 @@ class Event: ICalendar() {
     var userAgents = LinkedList<String>()
 
     // uid and sequence are inherited from iCalendar
-    var recurrenceId: RecurrenceId? = null
+    var recurrenceId: RecurrenceId<*>? = null
 
     var summary: String? = null
     var location: String? = null
     var description: String? = null
     var color: Css3Color? = null
 
-    var dtStart: DtStart? = null
-    var dtEnd: DtEnd? = null
+    var dtStart: DtStart<*>? = null
+    var dtEnd: DtEnd<*>? = null
 
     var duration: Duration? = null
-    val rRules = LinkedList<RRule>()
-    val exRules = LinkedList<ExRule>()
-    val rDates = LinkedList<RDate>()
-    val exDates = LinkedList<ExDate>()
+    val rRules = LinkedList<RRule<*>>()
+    val exRules = LinkedList<ExRule<*>>()
+    val rDates = LinkedList<RDate<*>>()
+    val exDates = LinkedList<ExDate<*>>()
 
     val exceptions = LinkedList<Event>()
 
@@ -89,10 +121,10 @@ class Event: ICalendar() {
 
             // make sure every event has an UID
             for (vEvent in vEvents)
-                if (vEvent.uid == null) {
+                if (vEvent.uid.isEmpty) {
                     val uid = Uid(UUID.randomUUID().toString())
                     Ical4Android.log.warning("Found VEVENT without UID, using a random one: ${uid.value}")
-                    vEvent.properties += uid
+                    vEvent += uid
                 }
 
             Ical4Android.log.fine("Assigning exceptions to main events")
@@ -100,30 +132,29 @@ class Event: ICalendar() {
             val exceptions = mutableMapOf<String /* UID */,MutableMap<String /* RECURRENCE-ID */,VEvent>>()
 
             for (vEvent in vEvents) {
-                val uid = vEvent.uid.value
+                val uid = vEvent.uid.get().value
                 val sequence = vEvent.sequence?.sequenceNo ?: 0
 
-                if (vEvent.recurrenceId == null) {
+                val recurrenceId = vEvent.getRecurrenceId<Temporal>()
+                if (recurrenceId == null) {
                     // main event (no RECURRENCE-ID)
 
                     // If there are multiple entries, compare SEQUENCE and use the one with higher SEQUENCE.
                     // If the SEQUENCE is identical, use latest version.
                     val event = mainEvents[uid]
-                    if (event == null || (event.sequence != null && sequence >= event.sequence.sequenceNo))
+                    val eventSequence = event?.sequence
+                    if (event == null || (eventSequence != null && sequence >= eventSequence.sequenceNo))
                         mainEvents[uid] = vEvent
 
                 } else {
                     // exception (RECURRENCE-ID)
-                    var ex = exceptions[uid]
                     // first index level: UID
-                    if (ex == null) {
-                        ex = mutableMapOf()
-                        exceptions[uid] = ex
-                    }
+                    val ex = exceptions.getOrPut(uid) { mutableMapOf() }
                     // second index level: RECURRENCE-ID
-                    val recurrenceID = vEvent.recurrenceId.value
+                    val recurrenceID = recurrenceId.value
                     val event = ex[recurrenceID]
-                    if (event == null || (event.sequence != null && sequence >= event.sequence.sequenceNo))
+                    val eventSequence = event?.sequence
+                    if (event == null || (eventSequence != null && sequence >= eventSequence.sequenceNo))
                         ex[recurrenceID] = vEvent
                 }
             }
@@ -151,28 +182,28 @@ class Event: ICalendar() {
             e.sequence = 0
 
             // process properties
-            for (prop in event.properties)
+            for (prop in event.getProperties<Property>())
                 when (prop) {
                     is Uid -> e.uid = prop.value
-                    is RecurrenceId -> e.recurrenceId = prop
+                    is RecurrenceId<*> -> e.recurrenceId = prop
                     is Sequence -> e.sequence = prop.sequenceNo
                     is Summary -> e.summary = prop.value
                     is Location -> e.location = prop.value
                     is Description -> e.description = prop.value
                     is Categories ->
-                        for (category in prop.categories)
+                        for (category in prop.categories.texts)
                             e.categories += category
                     is Color -> e.color = Css3Color.fromString(prop.value)
-                    is DtStart -> e.dtStart = prop
-                    is DtEnd -> e.dtEnd = prop
+                    is DtStart<*> -> e.dtStart = prop
+                    is DtEnd<*> -> e.dtEnd = prop
                     is Duration -> e.duration = prop
-                    is RRule -> e.rRules += prop
-                    is RDate -> e.rDates += prop
-                    is ExRule -> e.exRules += prop
-                    is ExDate -> e.exDates += prop
+                    is RRule<*> -> e.rRules += prop
+                    is RDate<*> -> e.rDates += prop
+                    is ExRule<*> -> e.exRules += prop
+                    is ExDate<*> -> e.exDates += prop
                     is Clazz -> e.classification = prop
                     is Status -> e.status = prop
-                    is Transp -> e.opaque = prop == Transp.OPAQUE
+                    is Transp -> e.opaque = prop == ImmutableTransp.OPAQUE
                     is Organizer -> e.organizer = prop
                     is Attendee -> e.attendees += prop
                     is LastModified -> e.lastModified = prop
@@ -183,9 +214,9 @@ class Event: ICalendar() {
             e.alarms.addAll(event.alarms)
 
             // validation
-            if (e.dtStart == null)
-                throw InvalidCalendarException("Event without start time")
-            else if (e.dtEnd != null && e.dtStart!!.date > e.dtEnd!!.date) {
+            val dtStart = e.dtStart ?: throw InvalidCalendarException("Event without start time")
+            val dtEnd = e.dtEnd
+            if (dtEnd != null && dtStart.date.toInstant() > dtEnd.date.toInstant()) {
                 Ical4Android.log.warning("DTSTART after DTEND; removing DTEND")
                 e.dtEnd = null
             }
@@ -200,8 +231,8 @@ class Event: ICalendar() {
         Ical4Android.checkThreadContextClassLoader()
 
         val ical = Calendar()
-        ical.properties += Version.VERSION_2_0
-        ical.properties +=
+        ical += ImmutableVersion.VERSION_2_0
+        ical +=
                 if (userAgents.isEmpty())
                     prodId
                 else
@@ -210,14 +241,13 @@ class Event: ICalendar() {
         val dtStart = dtStart ?: throw InvalidCalendarException("Won't generate event without start time")
 
         // "main event" (without exceptions)
-        val components = ical.components
         val mainEvent = toVEvent()
-        components += mainEvent
+        ical += mainEvent
 
         // remember used time zones
-        val usedTimeZones = mutableSetOf<TimeZone>()
-        dtStart.timeZone?.let(usedTimeZones::add)
-        dtEnd?.timeZone?.let(usedTimeZones::add)
+        val usedTimeZones = mutableSetOf<String>()
+        DateUtils.tzId(dtStart)?.let(usedTimeZones::add)
+        DateUtils.tzId(dtEnd)?.let(usedTimeZones::add)
 
         // recurrence exceptions
         for (exception in exceptions) {
@@ -240,27 +270,29 @@ class Event: ICalendar() {
             }
 
             // for simplicity and compatibility, rewrite date-time exceptions to the same time zone as DTSTART
-            if (isDateTime(recurrenceId) && recurrenceId.timeZone != dtStart.timeZone) {
+            if (isDateTime(recurrenceId) && (DateUtils.tzId(recurrenceId) != DateUtils.tzId(dtStart) || recurrenceId.isUtc != dtStart.isUtc)) {
                 Ical4Android.log.fine("Changing timezone of $recurrenceId to same time zone as dtStart: $dtStart")
-                recurrenceId.timeZone = dtStart.timeZone
+                AndroidTimeUtils.rewriteToTimeZoneOf(recurrenceId, dtStart)
             }
 
             // create and add VEVENT for exception
             val vException = exception.toVEvent()
-            components += vException
+            ical += vException
 
             // remember used time zones
-            exception.dtStart?.timeZone?.let(usedTimeZones::add)
-            exception.dtEnd?.timeZone?.let(usedTimeZones::add)
+            DateUtils.tzId(exception.dtStart)?.let(usedTimeZones::add)
+            DateUtils.tzId(exception.dtEnd)?.let(usedTimeZones::add)
         }
 
         // determine first dtStart (there may be exceptions with an earlier DTSTART that the main event)
-        val dtStarts = mutableListOf(dtStart.date)
+        val dtStarts = mutableListOf<Temporal>(dtStart.date)
         dtStarts.addAll(exceptions.mapNotNull { it.dtStart?.date })
-        val earliest = dtStarts.minOrNull()
+        val earliest = dtStarts.minByOrNull { it.toInstant() }
         // add VTIMEZONE components
-        for (tz in usedTimeZones)
-            ical.components += minifyVTimeZone(tz.vTimeZone, earliest)
+        for (tzId in usedTimeZones)
+            DateUtils.ical4jTimeZone(tzId)?.let { tz ->
+                ical += minifyVTimeZone(tz.vTimeZone, earliest)
+            }
 
         softValidate(ical)
         CalendarOutputter(false).output(ical, os)
@@ -273,70 +305,77 @@ class Event: ICalendar() {
      */
     private fun toVEvent(): VEvent {
         val event = VEvent(/* generates DTSTAMP */)
-        val props = event.properties
-        props += Uid(uid)
+        uid?.let { event += Uid(it) }
 
-        recurrenceId?.let { props += it }
+        recurrenceId?.let { event += it }
         sequence?.let {
             if (it != 0)
-                props += Sequence(it)
+                event += Sequence(it)
         }
 
-        summary?.let { props += Summary(it) }
-        location?.let { props += Location(it) }
-        description?.let { props += Description(it) }
-        color?.let { props += Color(null, it.name) }
+        summary?.let { event += Summary(it) }
+        location?.let { event += Location(it) }
+        description?.let { event += Description(it) }
+        color?.let { event += Color(ParameterList(), it.name) }
 
-        dtStart?.let { props += it }
-        dtEnd?.let { props += it }
-        duration?.let { props += it }
+        dtStart?.let { event += it }
+        dtEnd?.let { event += it }
+        duration?.let { event += it }
 
-        props.addAll(rRules)
-        props.addAll(rDates)
-        props.addAll(exRules)
-        props.addAll(exDates)
+        rRules.forEach { event += it }
+        rDates.forEach { event += it }
+        exRules.forEach { event += it }
+        exDates.forEach { event += it }
 
-        classification?.let { props += it }
-        status?.let { props += it }
+        classification?.let { event += it }
+        status?.let { event += it }
         if (!opaque)
-            props += Transp.TRANSPARENT
+            event += ImmutableTransp.TRANSPARENT
 
-        organizer?.let { props += it }
-        props.addAll(attendees)
+        organizer?.let { event += it }
+        attendees.forEach { event += it }
 
         if (categories.isNotEmpty())
-            props += Categories(TextList(categories.toTypedArray()))
-        props.addAll(unknownProperties)
+            event += Categories(TextList(categories))
+        unknownProperties.forEach { event += it }
 
-        lastModified?.let { props += it }
+        lastModified?.let { event += it }
 
-        event.alarms.addAll(alarms)
+        alarms.forEach { event += it }
 
         return event
     }
 
-    fun getEndDate(deriveFromDuration: Boolean): DtEnd? {
+    /**
+     * Returns the end of the event: either [dtEnd] or, if [deriveFromDuration] is set and [dtEnd]
+     * is not available, a DTEND which is calculated from [dtStart] and [duration].
+     *
+     * @param deriveFromDuration whether DTEND shall be calculated from DTSTART/DURATION if it's not available
+     * @return [dtEnd] or calculated DTEND (may be *null*)
+     */
+    fun getEndDate(deriveFromDuration: Boolean): DtEnd<*>? {
         val dtStart = this.dtStart
-        var dtEnd = this.dtEnd
+        var dtEnd: DtEnd<*>? = this.dtEnd
         // No DTEND? No problem, we'll use the DURATION.
         if (dtEnd == null && deriveFromDuration && dtStart != null) {
-            val vEventDuration: Duration
-            val duration = this.duration
-            if (duration != null) {
-                vEventDuration = duration
-            } else if (dtStart.getDate() is DateTime) {
-                // If "DTSTART" is a DATE-TIME, then the event's duration is zero (see: RFC 5545, 3.6.1 Event Component)
-                vEventDuration = Duration(Dur(0, 0, 0, 0))
-            } else {
-                // If "DTSTART" is a DATE, then the event's duration is one day (see: RFC 5545, 3.6.1 Event Component)
-                vEventDuration = Duration(Dur(1, 0, 0, 0))
-            }
+            val start: Temporal = dtStart.date
+            var duration: TemporalAmount = duration?.duration
+                    ?: if (isDateTime(dtStart))
+                        // If "DTSTART" is a DATE-TIME, then the event's duration is zero (see: RFC 5545, 3.6.1 Event Component)
+                        java.time.Duration.ZERO
+                    else
+                        // If "DTSTART" is a DATE, then the event's duration is one day (see: RFC 5545, 3.6.1 Event Component)
+                        Period.ofDays(1)
 
-            dtEnd = DtEnd(Dates.getInstance(
-                    TemporalAmountAdapter(vEventDuration.duration).getTime(dtStart.getDate()),
-                    dtStart.getParameter(Parameter.VALUE) as Value?))
-            if (dtStart.isUtc()) {
-                dtEnd.isUtc = true
+            if (start is LocalDate && duration is java.time.Duration)
+                // DATE values can only be used with days
+                duration = Period.ofDays(duration.toDays().toInt())
+
+            dtEnd = DtEnd(start.plus(duration)).also { end ->
+                // keep TZID of DTSTART
+                DateUtils.tzId(dtStart)?.let { tzId ->
+                    AndroidTimeUtils.setDate(end, end.date, tzId)
+                }
             }
         }
         return dtEnd
@@ -347,7 +386,7 @@ class Event: ICalendar() {
     /**
      * Determines whether this Event is an all-day event.
      *
-     * @return *true* if [dtStart] is a DATE value; *false* otherwise ([dtStart] is a DATETIME value or *null*)
+     * @return *true* if [dtStart] is a DATE value; *false* otherwise ([dtStart] is a DATE-TIME value or *null*)
      */
     fun isAllDay() = dtStart != null && !isDateTime(dtStart)
 

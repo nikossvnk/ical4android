@@ -9,14 +9,19 @@
 package at.bitfire.ical4android
 
 import net.fortuna.ical4j.data.CalendarBuilder
-import net.fortuna.ical4j.model.Date
-import net.fortuna.ical4j.model.DateTime
+import net.fortuna.ical4j.model.Component
+import net.fortuna.ical4j.model.Parameter
+import net.fortuna.ical4j.model.TemporalAdapter
 import net.fortuna.ical4j.model.TimeZone
 import net.fortuna.ical4j.model.TimeZoneRegistryFactory
 import net.fortuna.ical4j.model.component.VTimeZone
+import net.fortuna.ical4j.model.parameter.TzId
+import net.fortuna.ical4j.model.property.DateListProperty
 import net.fortuna.ical4j.model.property.DateProperty
 import java.io.StringReader
 import java.time.ZoneId
+import java.time.temporal.Temporal
+import kotlin.jvm.optionals.getOrNull
 
 /**
  * Date/time utilities
@@ -33,12 +38,25 @@ object DateUtils {
     @UsesThreadContextClassLoader
     private val tzRegistry = TimeZoneRegistryFactory.getInstance().createRegistry()
 
+    /**
+     * ical4j registers its own (VTIMEZONE-based) zones in the Java time zone database. Their
+     * IDs start with this prefix and are not known by Android.
+     */
+    private const val ICAL4J_ZONE_ID_PREFIX = "ical4j"
+
     init {
         Ical4Android.checkThreadContextClassLoader()
     }
 
 
     // time zones
+
+    /**
+     * IDs of the time zones which are known by the system (Android), without the zones
+     * that are only registered by ical4j.
+     */
+    private fun systemTimezoneIDs(): List<String> =
+            ZoneId.getAvailableZoneIds().filterNot { it.startsWith(ICAL4J_ZONE_ID_PREFIX) }
 
     /**
      * For a given time zone ID taken from an iCalendar resource, find the matching
@@ -56,7 +74,7 @@ object DateUtils {
      * @return best matching Android time zone ID
      */
     fun findAndroidTimezoneID(tzID: String?): String {
-        val availableTZs = ZoneId.getAvailableZoneIds()
+        val availableTZs = systemTimezoneIDs()
         var result: String? = null
 
         if (tzID != null) {
@@ -74,7 +92,7 @@ object DateUtils {
         }
 
         // if that doesn't work, use device default as fallback
-        return result ?: TimeZone.getDefault().id
+        return result ?: ZoneId.systemDefault().id
     }
 
     /**
@@ -88,30 +106,68 @@ object DateUtils {
     fun getZoneId(id: String?): ZoneId? =
             id?.let {
                 try {
-                    val zone = ZoneId.of(id)
-                    zone
-                } catch (e: Exception) {
+                    ZoneId.of(id)
+                } catch (_: Exception) {
                     null
                 }
             }
 
-    @Suppress("DEPRECATION")
+    /**
+     * Gets the ical4j time zone (which provides a [TimeZone.vTimeZone]) with the given ID
+     * from the global ical4j time zone registry.
+     *
+     * @param id    time zone ID, like "Europe/Berlin"
+     * @return      ical4j time zone, or null if no time zone with this ID is known by ical4j
+     */
     @UsesThreadContextClassLoader
     fun ical4jTimeZone(id: String): TimeZone? = tzRegistry.getTimeZone(id)
+
+    /**
+     * Gets the value of the TZID parameter of a date(-time) property.
+     *
+     * @param date date property (may be null)
+     * @return TZID parameter value or null if the property has no TZID (for instance, because
+     * it's a DATE, an UTC DATE-TIME or a floating DATE-TIME) or the argument was null
+     */
+    fun tzId(date: DateProperty<*>?): String? =
+            date?.getParameter<TzId>(Parameter.TZID)?.getOrNull()?.value
+
+    /**
+     * Gets the value of the TZID parameter of a date(-time) list property.
+     *
+     * @param dateList date list property
+     * @return TZID parameter value or null if the property has no TZID
+     */
+    fun tzId(dateList: DateListProperty<*>): String? =
+            dateList.getParameter<TzId>(Parameter.TZID).getOrNull()?.value
 
     /**
      * Determines whether a given date represents a DATE value.
      * @param date date property to check
      * @return *true* if the date is a DATE value; *false* otherwise (for instance, when the argument is a DATE-TIME value or null)
      */
-    fun isDate(date: DateProperty?) = date != null && date.date is Date && date.date !is DateTime
+    fun isDate(date: DateProperty<*>?) = date?.date != null && !TemporalAdapter.isDateTimePrecision(date.date)
 
     /**
      * Determines whether a given date represents a DATE-TIME value.
      * @param date date property to check
      * @return *true* if the date is a DATE-TIME value; *false* otherwise (for instance, when the argument is a DATE value or null)
      */
-    fun isDateTime(date: DateProperty?) = date != null && date.date is DateTime
+    fun isDateTime(date: DateProperty<*>?) = date?.date != null && TemporalAdapter.isDateTimePrecision(date.date)
+
+    /**
+     * Determines whether a given [Temporal] represents a DATE value.
+     * @param date value to check
+     * @return *true* if the value is a DATE value; *false* otherwise (DATE-TIME value or null)
+     */
+    fun isDate(date: Temporal?) = date != null && !TemporalAdapter.isDateTimePrecision(date)
+
+    /**
+     * Determines whether a given [Temporal] represents a DATE-TIME value.
+     * @param date value to check
+     * @return *true* if the value is a DATE-TIME value; *false* otherwise (DATE value or null)
+     */
+    fun isDateTime(date: Temporal?) = date != null && TemporalAdapter.isDateTimePrecision(date)
 
     /**
      * Parses a VTIMEZONE definition to a VTimeZone object.
@@ -122,12 +178,13 @@ object DateUtils {
     @UsesThreadContextClassLoader
     fun parseVTimeZone(timezoneDef: String): VTimeZone {
         Ical4Android.checkThreadContextClassLoader()
-        val builder = CalendarBuilder(tzRegistry)
+        // use a separate registry so that the parsed VTIMEZONE isn't registered globally
+        val builder = CalendarBuilder()
         try {
             val cal = builder.build(StringReader(timezoneDef))
-            return cal.getComponent(VTimeZone.VTIMEZONE) as VTimeZone
+            return cal.getComponent<VTimeZone>(Component.VTIMEZONE).get()
         } catch (e: Exception) {
-            throw IllegalArgumentException("Couldn't parse timezone definition")
+            throw IllegalArgumentException("Couldn't parse timezone definition", e)
         }
     }
 

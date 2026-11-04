@@ -3,7 +3,12 @@ package at.bitfire.ical4android
 import android.content.ContentResolver
 import net.fortuna.ical4j.data.DefaultParameterFactorySupplier
 import net.fortuna.ical4j.data.DefaultPropertyFactorySupplier
-import net.fortuna.ical4j.model.*
+import net.fortuna.ical4j.model.Parameter
+import net.fortuna.ical4j.model.ParameterBuilder
+import net.fortuna.ical4j.model.ParameterFactory
+import net.fortuna.ical4j.model.Property
+import net.fortuna.ical4j.model.PropertyBuilder
+import net.fortuna.ical4j.model.PropertyFactory
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -27,8 +32,8 @@ object UnknownProperty {
      */
     const val MAX_UNKNOWN_PROPERTY_SIZE = 25000
 
-    val propertyFactorySupplier: List<PropertyFactory<out Property>> = DefaultPropertyFactorySupplier().get()
-    val parameterFactorySupplier: List<ParameterFactory<out Parameter>> = DefaultParameterFactorySupplier().get()
+    val propertyFactorySupplier: List<PropertyFactory<*>> = DefaultPropertyFactorySupplier().get()
+    val parameterFactorySupplier: List<ParameterFactory<*>> = DefaultParameterFactorySupplier().get()
 
 
     /**
@@ -43,16 +48,14 @@ object UnknownProperty {
         val name = json.getString(0)
         val value = json.getString(1)
 
-        val builder = PropertyBuilder()
-                .factories(propertyFactorySupplier)
+        val builder = PropertyBuilder(propertyFactorySupplier)
                 .name(name)
                 .value(value)
 
         json.optJSONObject(2)?.let { jsonParams ->
             for (paramName in jsonParams.keys())
                 builder.parameter(
-                        ParameterBuilder()
-                                .factories(parameterFactorySupplier)
+                        ParameterBuilder(parameterFactorySupplier)
                                 .name(paramName)
                                 .value(jsonParams.getString(paramName))
                                 .build()
@@ -73,9 +76,10 @@ object UnknownProperty {
         json.put(prop.name)
         json.put(prop.value)
 
-        if (!prop.parameters.isEmpty) {
+        val params = prop.getParameters()
+        if (params.isNotEmpty()) {
             val jsonParams = JSONObject()
-            for (param in prop.parameters)
+            for (param: Parameter in params)
                 jsonParams.put(param.name, param.value)
             json.put(jsonParams)
         }
