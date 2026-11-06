@@ -67,8 +67,8 @@ dependencies {
     api("org.mnode.ical4j:ical4j:$ical4jVersion")
     api("org.threeten:threeten-extra:1.11.0")
     // ThreeTen-Extra leaves these annotations optional; R8 needs their actual classes.
-    // Use the current Java 8-compatible Joda-Convert line; 3.x requires Java 21.
-    runtimeOnly("org.joda:joda-convert:2.2.4")
+    // R8 strips them all, so the Java 21 bytecode of Joda-Convert 3.x never ships.
+    runtimeOnly("org.joda:joda-convert:3.0.1")
     runtimeOnly("org.jspecify:jspecify:1.0.1")
     // ical4j logs with slf4j, ical4android uses java.util.logging
     implementation("org.slf4j:slf4j-jdk14:2.0.20")
